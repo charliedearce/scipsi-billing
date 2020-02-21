@@ -24,12 +24,12 @@ Public Class frmPrintOR
         Try
 
             myCon.open()
-            myCmd = New SqlCommand("SELECT ot_bill_no,ot_net,ot_or_no FROM tbl_orbill_trans WHERE ot_or_no = '" & frmor.txtOrno.Text & "'", myCon)
+            myCmd = New SqlCommand("SELECT ot_bill_no,ot_net,ot_or_no,ot_citw FROM tbl_orbill_trans WHERE ot_or_no = '" & frmor.txtOrno.Text & "'", myCon)
             myReader = myCmd.ExecuteReader
             If myReader.HasRows = True Then
                 Do While myReader.Read()
                     billbox.Items.Add(myReader("ot_bill_no"))
-                    netbox.Items.Add(myReader("ot_net"))
+                    netbox.Items.Add(myReader("ot_net") + myReader("ot_citw"))
                 Loop
             End If
 
@@ -78,26 +78,27 @@ Public Class frmPrintOR
         Else
             mydate = frmor.lbldatetrans.Text
         End If
-        e.Graphics.DrawString(mydate, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(605, 115)) 'date
-        e.Graphics.DrawString(frmBilling.txtName.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(547, 288)) 'employee
+        e.Graphics.DrawString(mydate, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(605, 135)) 'date
+        e.Graphics.DrawString(frmBilling.txtName.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(530, 500)) 'employee
         'e.Graphics.DrawString("BALANCE: " + frmOR.txtbal.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(510, 320)) 'discount
-        e.Graphics.DrawString(lblclient.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(413, 134)) 'client
-        e.Graphics.DrawString(txtCheck.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(200, 317)) 'chcke number
+        e.Graphics.DrawString(lblclient.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(165, 173)) 'client
+        e.Graphics.DrawString(txtCheck.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(625, 415)) 'chcke number
 
-        e.Graphics.DrawString("BILL VAT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(130, 244)) 'chcke number
-        e.Graphics.DrawString(lblVat.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(136, 257)) 'chcke number
+        'e.Graphics.DrawString("BILL VAT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(130, 244)) 'chcke number
+        e.Graphics.DrawString(lblVat.Text, New Font("Microsoft San Serif", 7), Brushes.Black, New Point(170, 507)) 'chcke number
+        e.Graphics.DrawString(lblAmt.Text - lblVat.Text, New Font("Microsoft San Serif", 7), Brushes.Black, New Point(170, 519)) 'chcke number
+        e.Graphics.DrawString(lblAmt.Text, New Font("Microsoft San Serif", 7), Brushes.Black, New Point(170, 531)) 'chcke number
+        'e.Graphics.DrawString("BILL AMT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(130, 270)) 'chcke number
+        e.Graphics.DrawString(lblAmt.Text, New Font("Microsoft San Serif", 7), Brushes.Black, New Point(170, 495)) 'chcke number
 
-        e.Graphics.DrawString("BILL AMT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(130, 270)) 'chcke number
-        e.Graphics.DrawString(lblAmt.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(136, 283)) 'chcke number
-
-        e.Graphics.DrawString("W/H TAX:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 244)) 'chcke number
-        e.Graphics.DrawString(lblTax.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(230, 257)) 'chcke number
+        ' e.Graphics.DrawString("W/H TAX:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 244)) 'chcke number
+        e.Graphics.DrawString(lblTax.Text, New Font("Microsoft San Serif", 7), Brushes.Black, New Point(170, 543)) 'chcke number
 
         'e.Graphics.DrawString("DISCOUNT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 218)) 'chcke number
         'e.Graphics.DrawString(lblDiscount.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(230, 231)) 'chcke number
 
-        e.Graphics.DrawString("TOTAL DUE:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 270)) 'chcke number
-        e.Graphics.DrawString(lblTotal.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(230, 283)) 'chcke number
+        'e.Graphics.DrawString("TOTAL DUE:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 270)) 'chcke number
+        e.Graphics.DrawString(lblTotal.Text, New Font("Microsoft San Serif", 7), Brushes.Black, New Point(170, 555)) 'chcke number
 
         'e.Graphics.DrawString("CASH:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 270)) 'chcke number
         'e.Graphics.DrawString(lblCash.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(230, 283)) 'chcke number
@@ -105,11 +106,22 @@ Public Class frmPrintOR
         'e.Graphics.DrawString("CHANGE:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 270)) 'chcke number
         'e.Graphics.DrawString(lblChange.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(230, 283)) 'chcke number
 
-        e.Graphics.DrawString(bill, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(120, 60)) 'chcke number
-        e.Graphics.DrawString(netbill, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 60)) 'chcke number
+        e.Graphics.DrawString(bill, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(90, 310)) 'chcke number
+        e.Graphics.DrawString(netbill, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(260, 310)) 'chcke number
+
+        If (lblVat.Text <> 0) Then
+            e.Graphics.DrawString(lblVat.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(540, 300)) 'vat sales
+        Else
+            e.Graphics.DrawString(lblAmt.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(540, 340)) 'zero rated sales
+        End If
+
+        ' e.Graphics.DrawString("TEST", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(540, 320)) 'vat exempt
+
+        e.Graphics.DrawString(lblVat.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(540, 360)) 'vat amt
+        e.Graphics.DrawString(lblAmt.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(540, 380)) 'total sales
 
         'e.Graphics.DrawString(txtword.Text, New Font("Microsoft San Serif", 8), Brushes.Black, RectangleF(100, 30), New Point(413, 211)) 'chcke number
-        e.Graphics.DrawString(lblval.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(670, 231)) 'chcke number
+        e.Graphics.DrawString(lblval.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(140, 255)) 'chcke number
 
         'e.Graphics.DrawString(txtpartial.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(444, 259)) 'chcke number
 
@@ -120,9 +132,9 @@ Public Class frmPrintOR
         Dim drawFont As New Font("Microsoft San Serif", 8)
         Dim drawBrush As New SolidBrush(Color.Black)
         ' Create rectangle for drawing.
-        Dim x As Single = 413.0F
-        Dim y As Single = 208.0F
-        Dim width As Single = 330.0F
+        Dim x As Single = 130.0F
+        Dim y As Single = 235.0F
+        Dim width As Single = 520.0F
         Dim height As Single = 35.0F
         Dim drawRect As New RectangleF(x, y, width, height)
 
@@ -163,9 +175,9 @@ Public Class frmPrintOR
         'e.Graphics.DrawString(drawString1, drawFont1, drawBrush1,
         'drawRect1, drawFormat1)
 
-        e.Graphics.DrawString(frmor.lblAddress.Text, New Font("Microsoft San Serif", 9), Brushes.Black, New Point(320, 162))
-        e.Graphics.DrawString(frmor.txtBstyle.Text, New Font("Microsoft San Serif", 9), Brushes.Black, New Point(390, 190))
-        e.Graphics.DrawString(frmor.lblTin.Text, New Font("Microsoft San Serif", 9), Brushes.Black, New Point(610, 190))
+        e.Graphics.DrawString(frmor.lblAddress.Text, New Font("Microsoft San Serif", 9), Brushes.Black, New Point(110, 193))
+        e.Graphics.DrawString(frmor.lblBstyle.Text, New Font("Microsoft San Serif", 9), Brushes.Black, New Point(130, 208))
+        e.Graphics.DrawString(frmor.lblTin.Text, New Font("Microsoft San Serif", 9), Brushes.Black, New Point(590, 208))
 
     End Sub
 

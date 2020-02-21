@@ -49,7 +49,7 @@ Partial Class frmDeposit
         Me.Label3.Font = New System.Drawing.Font("Segoe UI", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label3.Location = New System.Drawing.Point(14, 34)
         Me.Label3.Name = "Label3"
-        Me.Label3.Size = New System.Drawing.Size(29, 13)
+        Me.Label3.Size = New System.Drawing.Size(27, 13)
         Me.Label3.TabIndex = 5
         Me.Label3.Text = "VAT:"
         '
@@ -59,7 +59,7 @@ Partial Class frmDeposit
         Me.Label1.Font = New System.Drawing.Font("Segoe UI", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label1.Location = New System.Drawing.Point(14, 79)
         Me.Label1.Name = "Label1"
-        Me.Label1.Size = New System.Drawing.Size(141, 13)
+        Me.Label1.Size = New System.Drawing.Size(139, 13)
         Me.Label1.TabIndex = 7
         Me.Label1.Text = "AMOUNT (VAT INCLUSIVE):"
         '
@@ -79,7 +79,7 @@ Partial Class frmDeposit
         Me.Label2.Font = New System.Drawing.Font("Segoe UI", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label2.Location = New System.Drawing.Point(14, 124)
         Me.Label2.Name = "Label2"
-        Me.Label2.Size = New System.Drawing.Size(110, 13)
+        Me.Label2.Size = New System.Drawing.Size(109, 13)
         Me.Label2.TabIndex = 9
         Me.Label2.Text = "WITH HOLDING TAX:"
         '

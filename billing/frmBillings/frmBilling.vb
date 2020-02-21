@@ -3,7 +3,6 @@ Imports System.Globalization
 Imports System.Windows.Forms
 Imports AutoUpdaterDotNET
 Public Class frmBilling
-
     Private Sub frmBilling_KeyDown(sender As Object, e As KeyEventArgs) Handles Me.KeyDown
         'If (e.Alt AndAlso (e.KeyCode = Keys.P)) Then
         ' When Alt + P is pressed, the Click event for the print
@@ -202,7 +201,7 @@ Public Class frmBilling
         txtVessel.Text = ""
         txtVoyage.Text = ""
         txtParticulars.Text = ""
-        txtBstyle.Text = ""
+        lblBstyle.Text = ""
         lblTin.Text = ""
         lblAddress.Text = ""
 
@@ -253,7 +252,7 @@ Public Class frmBilling
                 txtVessel.Text = ""
                 txtVoyage.Text = ""
                 txtParticulars.Text = ""
-                txtBstyle.Text = ""
+                lblBstyle.Text = ""
                 lblTin.Text = ""
                 lblAddress.Text = ""
 
@@ -348,7 +347,7 @@ Public Class frmBilling
                 .txtAccountno.Text = ""
                 .lblAccname.Text = ""
                 .txtRemarks.Text = ""
-                .txtBstyle.Text = ""
+                .lblBstyle.Text = ""
                 .lblTin.Text = ""
                 .lblAddress.Text = ""
 
@@ -378,8 +377,13 @@ Public Class frmBilling
 
     Private Sub lblAccname_Click(sender As Object, e As EventArgs) Handles lblAccname.Click
         If labelstatus.Text = 1 Then
-            frmWalkin.txtSearch.Text = lblAccname.Text
-            frmWalkin.ShowDialog()
+            With frmWalkin
+                .txtSearch.Text = lblAccname.Text
+                .txtBstyle.Text = lblBstyle.Text
+                .txtTin.Text = lblTin.Text
+                .txtAddress.Text = lblAddress.Text
+                .ShowDialog()
+            End With
         Else
 
         End If
@@ -479,7 +483,7 @@ Public Class frmBilling
     End Sub
 
 
-  
+
     Private Sub UpdateSoftwareToolStripMenuItem_Click(sender As Object, e As EventArgs) Handles UpdateSoftwareToolStripMenuItem.Click
         AutoUpdater.Start("http://192.168.10.29/update/update.xml")
     End Sub

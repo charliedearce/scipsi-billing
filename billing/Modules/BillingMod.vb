@@ -70,7 +70,7 @@ Module BillingMod
             frmBilling.lblAccname.Text = ""
             frmBilling.lblAddress.Text = ""
             frmBilling.lblTin.Text = ""
-            frmBilling.txtBstyle.Text = ""
+            frmBilling.lblBstyle.Text = ""
         Else
 
 
@@ -92,7 +92,7 @@ Module BillingMod
                                 frmBilling.lblAccname.Text = myReader("ac_name")
                                 frmBilling.lblAddress.Text = myReader("ac_address")
                                 frmBilling.lblTin.Text = myReader("ac_tin")
-                                frmBilling.txtBstyle.Text = myReader("ac_busi")
+                                frmBilling.lblBstyle.Text = myReader("ac_busi")
                             End If
                         End If
 
@@ -105,7 +105,7 @@ Module BillingMod
                     frmBilling.lblAccname.Text = ""
                     frmBilling.lblAddress.Text = ""
                     frmBilling.lblTin.Text = ""
-                    frmBilling.txtBstyle.Text = ""
+                    frmBilling.lblBstyle.Text = ""
 
                 End If
 
@@ -115,7 +115,7 @@ Module BillingMod
                 frmBilling.lblAccname.Text = ""
                 frmBilling.lblAddress.Text = ""
                 frmBilling.lblTin.Text = ""
-                frmBilling.txtBstyle.Text = ""
+                frmBilling.lblBstyle.Text = ""
                 frmBilling.txtNotice.Text = "Invalid Account number! Please Try Again."
             Finally
                 myCmd.Dispose()
@@ -265,7 +265,7 @@ Module BillingMod
             myCon.open()
             With frmBilling
 
-                myCmd = New SqlCommand("INSERT INTO tbl_bill_trans (bt_bill_num,bt_account,bt_vessel,bt_voyage,bt_particulars,bt_route,bt_type,bt_date,bt_employee,bt_status,bt_acc_num,bt_total,bt_ppa,bt_net,bt_vat,bt_scipsi,bt_br,bt_per,bt_ref,bt_indivat,bt_indiprint,bt_indippa,bt_disc)VALUES('" & .txtBillno.Text & "', '" & .lblAccname.Text & "', '" & .txtVessel.Text & "','" & .txtVoyage.Text & "',  '" & .txtParticulars.Text & "', '" & route & "', '" & type & "', '" & time & "','" & .txtName.Text & "' , '" & status & "','" & .txtAccountno.Text & "', '" & Convert.ToDecimal(.txtTotal.Text) & "', '" & Convert.ToDecimal(.txtLessppa.Text) & "', '" & Convert.ToDecimal(.txtNet.Text) & "', '" & Convert.ToDecimal(.txtVat.Text) & "', '" & Convert.ToDecimal(.txtScipsi.Text) & "','RB001','" & period & "','" & ref & "' ,'" & indivat & "','N','" & indippa & "', '" & Convert.ToDecimal(.txtDiscount.Text) & "')", myCon)
+                myCmd = New SqlCommand("INSERT INTO tbl_bill_trans (bt_bill_num,bt_account,bt_vessel,bt_voyage,bt_particulars,bt_route,bt_type,bt_date,bt_employee,bt_status,bt_acc_num,bt_total,bt_ppa,bt_net,bt_vat,bt_scipsi,bt_br,bt_per,bt_ref,bt_indivat,bt_indiprint,bt_indippa,bt_disc,bt_bstyle,bt_tin,bt_baddress)VALUES('" & .txtBillno.Text & "', '" & .lblAccname.Text & "', '" & .txtVessel.Text & "','" & .txtVoyage.Text & "',  '" & .txtParticulars.Text & "', '" & route & "', '" & type & "', '" & time & "','" & .txtName.Text & "' , '" & status & "','" & .txtAccountno.Text & "', '" & Convert.ToDecimal(.txtTotal.Text) & "', '" & Convert.ToDecimal(.txtLessppa.Text) & "', '" & Convert.ToDecimal(.txtNet.Text) & "', '" & Convert.ToDecimal(.txtVat.Text) & "', '" & Convert.ToDecimal(.txtScipsi.Text) & "','RB001','" & period & "','" & ref & "' ,'" & indivat & "','N','" & indippa & "', '" & Convert.ToDecimal(.txtDiscount.Text) & "', '" & .lblBstyle.Text & "', '" & .lblTin.Text & "', '" & .lblAddress.Text & "')", myCon)
                 myCmd.ExecuteNonQuery()
 
                 Dim mycmd1 = New SqlCommand("DELETE FROM tbl_bill_no WHERE b_num ='" & .txtBillno.Text & "'", myCon)
@@ -396,7 +396,7 @@ Module BillingMod
                 myCon.open()
                 With frmBilling
 
-                    myCmd = New SqlCommand(String.Format("UPDATE tbl_bill_trans SET bt_account='{0}',bt_vessel='{1}',bt_voyage='{2}',bt_particulars='{3}',bt_route = '{4}',bt_type='{5}',bt_date='{6}',bt_acc_num='{7}',bt_total='{8}',bt_ppa='{9}',bt_net='{10}',bt_vat='{11}',bt_scipsi='{12}',bt_per='{13}',bt_ref='{14}',bt_indivat='{15}',bt_indippa='{16}',bt_disc='{17}' WHERE bt_bill_num='{18}'", .lblAccname.Text, .txtVessel.Text, .txtVoyage.Text, .txtParticulars.Text, route, type, time, .txtAccountno.Text, Convert.ToDecimal(.txtTotal.Text), Convert.ToDecimal(.txtLessppa.Text), Convert.ToDecimal(.txtNet.Text), Convert.ToDecimal(.txtVat.Text), Convert.ToDecimal(.txtScipsi.Text), period, ref, indivat, indippa, Convert.ToDecimal(.txtDiscount.Text), .txtBillno.Text), myCon)
+                    myCmd = New SqlCommand(String.Format("UPDATE tbl_bill_trans SET bt_account='{0}',bt_vessel='{1}',bt_voyage='{2}',bt_particulars='{3}',bt_route = '{4}',bt_type='{5}',bt_date='{6}',bt_acc_num='{7}',bt_total='{8}',bt_ppa='{9}',bt_net='{10}',bt_vat='{11}',bt_scipsi='{12}',bt_per='{13}',bt_ref='{14}',bt_indivat='{15}',bt_indippa='{16}',bt_disc='{17}',bt_bstyle='{19}',bt_tin='{20}',bt_baddress='{21}' WHERE bt_bill_num='{18}'", .lblAccname.Text, .txtVessel.Text, .txtVoyage.Text, .txtParticulars.Text, route, type, time, .txtAccountno.Text, Convert.ToDecimal(.txtTotal.Text), Convert.ToDecimal(.txtLessppa.Text), Convert.ToDecimal(.txtNet.Text), Convert.ToDecimal(.txtVat.Text), Convert.ToDecimal(.txtScipsi.Text), period, ref, indivat, indippa, Convert.ToDecimal(.txtDiscount.Text), .txtBillno.Text, .lblBstyle.Text, .lblTin.Text, .lblAddress.Text), myCon)
                     myCmd.ExecuteNonQuery()
                     frmBilling.txtNotice.Text = "Transaction Updated."
                 End With

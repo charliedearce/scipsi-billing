@@ -26,12 +26,12 @@ Partial Class frmBackdates
         Me.SimpleButton1 = New DevExpress.XtraEditors.SimpleButton()
         Me.SimpleButton2 = New DevExpress.XtraEditors.SimpleButton()
         Me.DataGridView1 = New System.Windows.Forms.DataGridView()
-        Me.Column1 = New System.Windows.Forms.DataGridViewTextBoxColumn()
-        Me.DataGridViewTextBoxColumn3 = New System.Windows.Forms.DataGridViewTextBoxColumn()
-        Me.DataGridViewTextBoxColumn4 = New System.Windows.Forms.DataGridViewTextBoxColumn()
-        Me.DataGridViewTextBoxColumn5 = New System.Windows.Forms.DataGridViewTextBoxColumn()
-        Me.DataGridViewTextBoxColumn1 = New System.Windows.Forms.DataGridViewTextBoxColumn()
         Me.aa = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.DataGridViewTextBoxColumn1 = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.DataGridViewTextBoxColumn5 = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.DataGridViewTextBoxColumn4 = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.DataGridViewTextBoxColumn3 = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.Column1 = New System.Windows.Forms.DataGridViewTextBoxColumn()
         Me.GroupBox6 = New System.Windows.Forms.GroupBox()
         Me.txtdate = New DevExpress.XtraEditors.DateEdit()
         CType(Me.DataGridView1, System.ComponentModel.ISupportInitialize).BeginInit()
@@ -47,7 +47,7 @@ Partial Class frmBackdates
         Me.Label3.Location = New System.Drawing.Point(135, 9)
         Me.Label3.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
         Me.Label3.Name = "Label3"
-        Me.Label3.Size = New System.Drawing.Size(318, 28)
+        Me.Label3.Size = New System.Drawing.Size(256, 21)
         Me.Label3.TabIndex = 70
         Me.Label3.Text = "REQUEST FORM FOR BACK DATES"
         '
@@ -70,7 +70,7 @@ Partial Class frmBackdates
         Me.Label14.Location = New System.Drawing.Point(13, 51)
         Me.Label14.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
         Me.Label14.Name = "Label14"
-        Me.Label14.Size = New System.Drawing.Size(150, 28)
+        Me.Label14.Size = New System.Drawing.Size(119, 21)
         Me.Label14.TabIndex = 103
         Me.Label14.Text = "REQUEST DATE:"
         '
@@ -82,7 +82,7 @@ Partial Class frmBackdates
         Me.Label1.Location = New System.Drawing.Point(13, 88)
         Me.Label1.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
         Me.Label1.Name = "Label1"
-        Me.Label1.Size = New System.Drawing.Size(92, 28)
+        Me.Label1.Size = New System.Drawing.Size(74, 21)
         Me.Label1.TabIndex = 104
         Me.Label1.Text = "REASON:"
         '
@@ -126,38 +126,13 @@ Partial Class frmBackdates
         Me.DataGridView1.Size = New System.Drawing.Size(541, 235)
         Me.DataGridView1.TabIndex = 22
         '
-        'Column1
+        'aa
         '
-        Me.Column1.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill
-        Me.Column1.DataPropertyName = "d_use"
-        Me.Column1.HeaderText = "use"
-        Me.Column1.Name = "Column1"
-        Me.Column1.ReadOnly = True
-        Me.Column1.Visible = False
-        '
-        'DataGridViewTextBoxColumn3
-        '
-        Me.DataGridViewTextBoxColumn3.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill
-        Me.DataGridViewTextBoxColumn3.DataPropertyName = "d_reason"
-        Me.DataGridViewTextBoxColumn3.HeaderText = "REASON"
-        Me.DataGridViewTextBoxColumn3.Name = "DataGridViewTextBoxColumn3"
-        Me.DataGridViewTextBoxColumn3.ReadOnly = True
-        '
-        'DataGridViewTextBoxColumn4
-        '
-        Me.DataGridViewTextBoxColumn4.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill
-        Me.DataGridViewTextBoxColumn4.DataPropertyName = "d_reqby"
-        Me.DataGridViewTextBoxColumn4.HeaderText = "REQUEST BY"
-        Me.DataGridViewTextBoxColumn4.Name = "DataGridViewTextBoxColumn4"
-        Me.DataGridViewTextBoxColumn4.ReadOnly = True
-        '
-        'DataGridViewTextBoxColumn5
-        '
-        Me.DataGridViewTextBoxColumn5.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill
-        Me.DataGridViewTextBoxColumn5.DataPropertyName = "d_status"
-        Me.DataGridViewTextBoxColumn5.HeaderText = "STATUS"
-        Me.DataGridViewTextBoxColumn5.Name = "DataGridViewTextBoxColumn5"
-        Me.DataGridViewTextBoxColumn5.ReadOnly = True
+        Me.aa.DataPropertyName = "d_id"
+        Me.aa.HeaderText = "id"
+        Me.aa.Name = "aa"
+        Me.aa.ReadOnly = True
+        Me.aa.Visible = False
         '
         'DataGridViewTextBoxColumn1
         '
@@ -167,13 +142,38 @@ Partial Class frmBackdates
         Me.DataGridViewTextBoxColumn1.Name = "DataGridViewTextBoxColumn1"
         Me.DataGridViewTextBoxColumn1.ReadOnly = True
         '
-        'aa
+        'DataGridViewTextBoxColumn5
         '
-        Me.aa.DataPropertyName = "d_id"
-        Me.aa.HeaderText = "id"
-        Me.aa.Name = "aa"
-        Me.aa.ReadOnly = True
-        Me.aa.Visible = False
+        Me.DataGridViewTextBoxColumn5.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill
+        Me.DataGridViewTextBoxColumn5.DataPropertyName = "d_status"
+        Me.DataGridViewTextBoxColumn5.HeaderText = "STATUS"
+        Me.DataGridViewTextBoxColumn5.Name = "DataGridViewTextBoxColumn5"
+        Me.DataGridViewTextBoxColumn5.ReadOnly = True
+        '
+        'DataGridViewTextBoxColumn4
+        '
+        Me.DataGridViewTextBoxColumn4.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill
+        Me.DataGridViewTextBoxColumn4.DataPropertyName = "d_reqby"
+        Me.DataGridViewTextBoxColumn4.HeaderText = "REQUEST BY"
+        Me.DataGridViewTextBoxColumn4.Name = "DataGridViewTextBoxColumn4"
+        Me.DataGridViewTextBoxColumn4.ReadOnly = True
+        '
+        'DataGridViewTextBoxColumn3
+        '
+        Me.DataGridViewTextBoxColumn3.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill
+        Me.DataGridViewTextBoxColumn3.DataPropertyName = "d_reason"
+        Me.DataGridViewTextBoxColumn3.HeaderText = "REASON"
+        Me.DataGridViewTextBoxColumn3.Name = "DataGridViewTextBoxColumn3"
+        Me.DataGridViewTextBoxColumn3.ReadOnly = True
+        '
+        'Column1
+        '
+        Me.Column1.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill
+        Me.Column1.DataPropertyName = "d_use"
+        Me.Column1.HeaderText = "use"
+        Me.Column1.Name = "Column1"
+        Me.Column1.ReadOnly = True
+        Me.Column1.Visible = False
         '
         'GroupBox6
         '
@@ -203,7 +203,7 @@ Partial Class frmBackdates
         Me.txtdate.Properties.NullDate = New Date(2015, 7, 7, 16, 56, 8, 90)
         Me.txtdate.Properties.NullValuePromptShowForEmptyValue = True
         Me.txtdate.Properties.TextEditStyle = DevExpress.XtraEditors.Controls.TextEditStyles.DisableTextEditor
-        Me.txtdate.Size = New System.Drawing.Size(208, 32)
+        Me.txtdate.Size = New System.Drawing.Size(208, 26)
         Me.txtdate.TabIndex = 0
         '
         'frmBackdates
@@ -211,7 +211,7 @@ Partial Class frmBackdates
         Me.Appearance.BackColor = System.Drawing.Color.White
         Me.Appearance.Options.UseBackColor = True
         Me.Appearance.Options.UseFont = True
-        Me.AutoScaleDimensions = New System.Drawing.SizeF(7.0!, 17.0!)
+        Me.AutoScaleDimensions = New System.Drawing.SizeF(6.0!, 12.0!)
         Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
         Me.ClientSize = New System.Drawing.Size(589, 485)
         Me.Controls.Add(Me.GroupBox6)

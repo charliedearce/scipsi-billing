@@ -12,11 +12,17 @@
             If txtSearch.Text = "" Then
                 frmor.txtNotice.Text = "Please enter Customer name."
             Else
-                frmor.lblAccname.Text = txtSearch.Text
+                With frmor
+                    .lblAccname.Text = txtSearch.Text
+                    .lblBstyle.Text = txtBstyle.Text
+                    .lblTin.Text = txtTin.Text
+                    .lblAddress.Text = txtAddress.Text
+                End With
                 txtSearch.Text = ""
+                Me.Dispose()
             End If
         ElseIf (e.KeyCode = Keys.Escape) Then
-            Me.Hide()
+            Me.Dispose()
         End If
 
     End Sub

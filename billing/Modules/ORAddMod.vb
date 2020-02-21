@@ -63,7 +63,49 @@ Module ORAddMod
             myCon.open()
             With frmor
 
-                myCmd = New SqlCommand("INSERT INTO tbl_or_trans (or_acc_num,or_accname,or_remarks,or_date,or_status,or_employee,or_bill_vat,or_bill_amount,or_htax,or_net,or_check_num,or_num,or_cash,or_period,or_bank,or_book,or_indiprint)VALUES ('" & .txtAccountno.Text & "','" & .lblAccname.Text & "','" & .txtRemarks.Text & "','" & mydate & "','FALSE','" & frmBilling.txtnametemp.Text & "','" & Convert.ToDecimal(.txtORVat.Text) & "','" & Convert.ToDecimal(.txtORBillAmount.Text) & "','" & Convert.ToDecimal(.txtHTax.Text) & "','" & Convert.ToDecimal(.txtNetIncome.Text) & "','" & frmORCash.txtCheckno.Text & "','" & .txtOrno.Text & "','" & Convert.ToDecimal(frmORCash.txtCash.Text) & "','" & period & "','" & .txtbank.Text & "','OR001','N')", myCon)
+                myCmd = New SqlCommand("INSERT INTO tbl_or_trans 
+                    (or_acc_num,
+                    or_accname,
+                    or_remarks,
+                    or_date,
+                    or_status,
+                    or_employee,
+                    or_bill_vat,
+                    or_bill_amount,
+                    or_htax,
+                    or_net,
+                    or_check_num,
+                    or_num,
+                    or_cash,
+                    or_period,
+                    or_bank,
+                    or_book,
+                    or_indiprint,
+                    or_bstyle,
+                    or_tin,
+                    or_baddress)
+                    VALUES 
+                    ('" & .txtAccountno.Text & "',
+                    '" & .lblAccname.Text & "',
+                    '" & .txtRemarks.Text & "',
+                    '" & mydate & "',
+                    'FALSE',
+                    '" & frmBilling.txtnametemp.Text & "',
+                    '" & Convert.ToDecimal(.txtORVat.Text) & "',
+                    '" & Convert.ToDecimal(.txtORBillAmount.Text) & "',
+                    '" & Convert.ToDecimal(.txtHTax.Text) & "',
+                    '" & Convert.ToDecimal(.txtNetIncome.Text) & "',
+                    '" & frmORCash.txtCheckno.Text & "',
+                    '" & .txtOrno.Text & "',
+                    '" & Convert.ToDecimal(frmORCash.txtCash.Text) & "',
+                    '" & period & "',
+                    '" & .txtbank.Text & "',
+                    'OR001',
+                    'N',
+                    '" & .lblBstyle.Text & "',
+                    '" & .lblTin.Text & "',
+                    '" & .lblAddress.Text & "'
+                    )", myCon)
                 myCmd.ExecuteNonQuery()
 
                 Dim mycmd1 = New SqlCommand("DELETE FROM tbl_or_no WHERE or_num ='" & .txtOrno.Text & "'", myCon)
@@ -90,7 +132,7 @@ Module ORAddMod
             .txtNetIncome.Text = 0
             .txtHTax.Text = 0
             .txtbank.Text = ""
-            .txtBstyle.Text = ""
+            .lblBstyle.Text = ""
             .lblTin.Text = ""
             .lblAddress.Text = ""
             .txtbank.Enabled = False
@@ -165,7 +207,7 @@ Module ORAddMod
                 myCon.open()
                 With frmor
 
-                    myCmd = New SqlCommand(String.Format("UPDATE tbl_or_trans SET or_acc_num = '{0}',or_accname = '{1}',or_remarks = '{2}',or_date = '{3}',or_period = '{4}',or_bank = '{5}' WHERE or_num = '{6}'", .txtAccountno.Text, .lblAccname.Text, .txtRemarks.Text, time, period, frmor.txtbank.Text, frmor.txtOrno.Text), myCon)
+                    myCmd = New SqlCommand(String.Format("UPDATE tbl_or_trans SET or_acc_num = '{0}',or_accname = '{1}',or_remarks = '{2}',or_date = '{3}',or_period = '{4}',or_bank = '{5}',or_bstyle = '{7}',or_tin = '{8}',or_baddress = '{9}' WHERE or_num = '{6}'", .txtAccountno.Text, .lblAccname.Text, .txtRemarks.Text, time, period, frmor.txtbank.Text, frmor.txtOrno.Text, frmor.lblBstyle.Text, frmor.lblTin.Text, frmor.lblAddress.Text), myCon)
                     myCmd.ExecuteNonQuery()
                     frmor.txtNotice.Text = "Transaction Updated."
                 End With

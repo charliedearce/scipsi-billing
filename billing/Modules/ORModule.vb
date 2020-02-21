@@ -102,7 +102,7 @@ Module ORModule
             frmor.lblAccname.Text = ""
             frmor.lblAddress.Text = ""
             frmor.lblTin.Text = ""
-            frmor.txtBstyle.Text = ""
+            frmor.lblBstyle.Text = ""
         Else
 
 
@@ -123,7 +123,7 @@ Module ORModule
                                 frmor.lblAccname.Text = myReader("ac_name")
                                 frmor.lblAddress.Text = myReader("ac_address")
                                 frmor.lblTin.Text = myReader("ac_tin")
-                                frmor.txtBstyle.Text = myReader("ac_busi")
+                                frmor.lblBstyle.Text = myReader("ac_busi")
                             End If
                         End If
 
@@ -133,7 +133,7 @@ Module ORModule
                     frmor.txtAccountno.Text = ""
                     frmor.lblAddress.Text = ""
                     frmor.lblTin.Text = ""
-                    frmor.txtBstyle.Text = ""
+                    frmor.lblBstyle.Text = ""
                     frmor.txtAccountno.Focus()
                     frmor.txtNotice.Text = "Invalid Account number! Please Try Again."
 
@@ -145,7 +145,7 @@ Module ORModule
                 frmor.txtAccountno.Text = ""
                 frmor.lblAddress.Text = ""
                 frmor.lblTin.Text = ""
-                frmor.txtBstyle.Text = ""
+                frmor.lblBstyle.Text = ""
                 frmor.txtAccountno.Focus()
                 frmor.txtNotice.Text = "Invalid Account number! Please Try Again."
             Finally
@@ -164,7 +164,7 @@ Module ORModule
             If myReader.Read Then
                 frmor.lblAddress.Text = myReader("ac_address")
                 frmor.lblTin.Text = myReader("ac_tin")
-                frmor.txtBstyle.Text = myReader("ac_busi")
+                frmor.lblBstyle.Text = myReader("ac_busi")
             End If
         End If
         myCmd.Dispose()

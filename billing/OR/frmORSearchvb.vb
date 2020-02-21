@@ -61,6 +61,9 @@ Public Class frmORSearchvb
                             .txtbank.Text = myReader("or_bank")
                             .txtbal.Text = myReader("or_balance")
                             .txtperiod.Text = myReader("or_period")
+                            .lblBstyle.Text = myReader("or_bstyle")
+                            .lblTin.Text = myReader("or_tin")
+                            .lblAddress.Text = myReader("or_baddress")
 
                             If myReader("or_status") = "TRUE" Then
                                 frmor.txtNotice.Text = "This OR # is already cancelled."
@@ -118,13 +121,13 @@ Public Class frmORSearchvb
                     myCon.close()
                     Me.Hide()
                     'frmOR.txtNotice.Text = ""
-                    txtORno.Text = ""
-                    With frmor
-                        .txtBstyle.Text = ""
-                        .lblAddress.Text = ""
-                        .lblTin.Text = ""
-                    End With
-                    searchClientNewDetails(frmor.txtAccountno.Text)
+                    'txtORno.Text = ""
+                    'With frmor
+                    '    .lblBstyle.Text = ""
+                    '    .lblAddress.Text = ""
+                    '    .lblTin.Text = ""
+                    'End With
+                    'searchClientNewDetails(frmor.txtAccountno.Text)
                     Dim vat As Decimal
                     Dim billamount As Decimal
                     Dim htax As Decimal

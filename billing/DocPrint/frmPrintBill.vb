@@ -108,8 +108,8 @@ Public Class frmPrintBill
             mydate = frmBilling.lbldatetrans.Text
         End If
         e.Graphics.DrawString(frmBilling.txtBillno.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(620, 96)) 'bill
-        e.Graphics.DrawString(frmBilling.txtAccountno.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 120)) 'account
-        e.Graphics.DrawString(frmBilling.lblAccname.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 140)) 'account
+        e.Graphics.DrawString(frmBilling.txtAccountno.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 100)) 'account
+        e.Graphics.DrawString(frmBilling.lblAccname.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 120)) 'account
         e.Graphics.DrawString(frmBilling.txtVessel.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(80, 240)) 'vessel
         e.Graphics.DrawString(frmBilling.txtVoyage.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(300, 240)) 'voyage
         e.Graphics.DrawString("IN/OUT: " + frmBilling.cbType.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(600, 220)) 'type
@@ -124,21 +124,37 @@ Public Class frmPrintBill
         e.Graphics.DrawString(rate, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(570, 277)) 'rate
         e.Graphics.DrawString(gross, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(650, 277)) 'gross
 
-        e.Graphics.DrawString("TOTAL CHARGES:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(210, 461)) 'gross
-        e.Graphics.DrawString(frmBilling.txtTotal.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 474)) 'gross
-        e.Graphics.DrawString("PPA SHARE:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(210, 487)) 'gross
-        e.Graphics.DrawString(frmBilling.txtLessppa.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 500)) 'gross
+        'e.Graphics.DrawString("TOTAL CHARGES:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(210, 461)) 'gross text
+        'e.Graphics.DrawString(frmBilling.txtTotal.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(220, 474)) 'gross
+        e.Graphics.DrawString("PPA SHARE:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(530, 410)) 'ppa share text
+        e.Graphics.DrawString(frmBilling.txtLessppa.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(635, 410)) 'ppa share
 
-        e.Graphics.DrawString("TOTAL DISCOUNT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(355, 461)) 'gross
-        e.Graphics.DrawString(frmBilling.txtDiscount.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(365, 474)) 'gross
-        e.Graphics.DrawString("SCIPSI SHARE:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(355, 487)) 'gross
-        e.Graphics.DrawString(frmBilling.txtNet.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(365, 500)) 'gross
+        e.Graphics.DrawString("DISCOUNT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(530, 425)) 'total discount text
+        e.Graphics.DrawString(frmBilling.txtDiscount.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(635, 425)) 'discount
+        e.Graphics.DrawString("SCIPSI SHARE:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(530, 440)) 'scipsi share text
+        e.Graphics.DrawString(frmBilling.txtNet.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(635, 440)) 'scipsi share
 
-        e.Graphics.DrawString("12% VAT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(500, 461)) 'gross
-        e.Graphics.DrawString(frmBilling.txtVat.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(510, 474)) 'gross
+        e.Graphics.DrawString("12% VAT:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(530, 455)) 'vat txt
+        e.Graphics.DrawString(frmBilling.txtVat.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(635, 455)) 'vat
 
-        e.Graphics.DrawString("TOTAL AMOUNT:" + Environment.NewLine + "DUE TO SCIPSI:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(600, 461)) 'gross
-        e.Graphics.DrawString(frmBilling.txtScipsi.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(610, 500)) 'gross
+        '  e.Graphics.DrawString("TOTAL AMOUNT:" + Environment.NewLine + "DUE TO SCIPSI:", New Font("Microsoft San Serif", 8), Brushes.Black, New Point(600, 461)) 'total amount text
+        e.Graphics.DrawString(frmBilling.txtScipsi.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(635, 500)) 'total amount
+
+        'UPDATED POSITION AND FIELDS
+        e.Graphics.DrawString(frmBilling.txtScipsi.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(415, 400)) 'total amount
+        e.Graphics.DrawString(frmBilling.txtVat.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(415, 415)) 'vat
+        e.Graphics.DrawString(frmBilling.txtNet.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(415, 430)) 'scipsi share
+        e.Graphics.DrawString(frmBilling.txtDiscount.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(415, 445)) 'discount
+        e.Graphics.DrawString(frmBilling.txtNet.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(415, 465)) 'scipsi share
+        e.Graphics.DrawString(frmBilling.txtVat.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(415, 480)) 'vat
+        e.Graphics.DrawString(frmBilling.txtScipsi.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(415, 495)) 'total amount
+        If (frmBilling.txtVat.Text <> "0.00") Then
+            e.Graphics.DrawString(frmBilling.txtNet.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(210, 440)) 'scipsi share
+        Else
+            e.Graphics.DrawString(frmBilling.txtNet.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(210, 475)) 'scipsi share
+        End If
+        e.Graphics.DrawString(frmBilling.txtVat.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(210, 495)) 'vat
+
 
         'additional fields
 
@@ -160,9 +176,27 @@ Public Class frmPrintBill
         ' drawRect, drawFormat)
 
 
-        e.Graphics.DrawString(frmBilling.lblAddress.Text, New Font("Microsoft San Serif", 7), Brushes.Black, New Point(70, 165)) 'address
-        e.Graphics.DrawString(frmBilling.txtBstyle.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(70, 190)) 'bus style
-        e.Graphics.DrawString(frmBilling.lblTin.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(70, 205)) 'tin no
+        'e.Graphics.DrawString(frmBilling.lblAddress.Text, New Font("Microsoft San Serif", 7), Brushes.Black, New Point(70, 145)) 'address
+
+        Dim drawString As [String] = frmBilling.lblAddress.Text
+        ' Create font and brush.
+        Dim drawFont As New Font("Microsoft San Serif", 8)
+        Dim drawBrush As New SolidBrush(Color.Black)
+        ' Create rectangle for drawing.
+        Dim x As Single = 70.0F
+        Dim y As Single = 145.0F
+        Dim width As Single = 400.0F
+        Dim height As Single = 35.0F
+        Dim drawRect As New RectangleF(x, y, width, height)
+
+        Dim drawFormat As New StringFormat()
+        drawFormat.Alignment = StringAlignment.Near
+        ' Draw string to screen.
+        e.Graphics.DrawString(drawString, drawFont, drawBrush,
+        drawRect, drawFormat)
+
+        e.Graphics.DrawString(frmBilling.lblBstyle.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(70, 170)) 'bus style
+        e.Graphics.DrawString(frmBilling.lblTin.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(70, 185)) 'tin no
     End Sub
 
 End Class

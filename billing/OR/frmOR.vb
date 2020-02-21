@@ -1,5 +1,4 @@
 ﻿Public Class frmor
-
     Private Sub PictureBox1_Click(sender As Object, e As EventArgs)
 
     End Sub
@@ -22,10 +21,9 @@
             vORAccno()
         End If
 
-        If btnUpdate.Visible = True Then
+        If btnUpdate.Enabled = True Then
             vORAccno()
         End If
-
     End Sub
 
     Private Sub frmOR_KeyDown(sender As Object, e As KeyEventArgs) Handles Me.KeyDown
@@ -131,7 +129,7 @@
         txtNetIncome.Text = 0
         viewORItems()
         txtNotice.Text = ""
-        txtBstyle.Text = ""
+        lblBstyle.Text = ""
         lblTin.Text = ""
         lblAddress.Text = ""
 
@@ -203,10 +201,14 @@
 
 
     Private Sub lblAccname_Click(sender As Object, e As EventArgs) Handles lblAccname.Click
-        If labelstatus.Text = 1 Then
-            frmWalkin1.txtSearch.Text = lblAccname.Text
-            frmWalkin1.ShowDialog()
-        Else
+        If txtSearchIndicator.Text = 0 Then
+            With frmWalkin1
+                .txtSearch.Text = lblAccname.Text
+                .txtBstyle.Text = lblBstyle.Text
+                .txtTin.Text = lblTin.Text
+                .txtAddress.Text = lblAddress.Text
+                .ShowDialog()
+            End With
         End If
     End Sub
 
@@ -370,7 +372,7 @@
 
         lblTin.Text = ""
         lblAddress.Text = ""
-        txtBstyle.Text = ""
+        lblBstyle.Text = ""
 
         Me.Dispose()
         frmBilling.Show()
@@ -424,5 +426,9 @@
 
     Private Sub Timer1_Tick_2(sender As Object, e As EventArgs) Handles Timer1.Tick
         autochangedate(txtTime.Text)
+    End Sub
+
+    Private Sub txtAccountno_MouseMove(sender As Object, e As MouseEventArgs) Handles txtAccountno.MouseMove
+
     End Sub
 End Class

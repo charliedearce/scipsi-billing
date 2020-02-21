@@ -49,9 +49,12 @@ Partial Class frmor
         Me.Label4 = New System.Windows.Forms.Label()
         Me.Label1 = New System.Windows.Forms.Label()
         Me.GroupBox2 = New System.Windows.Forms.GroupBox()
+        Me.Label10 = New System.Windows.Forms.Label()
+        Me.lblBstyle = New DevExpress.XtraEditors.LabelControl()
+        Me.Label9 = New System.Windows.Forms.Label()
+        Me.lblTin = New DevExpress.XtraEditors.LabelControl()
+        Me.Label8 = New System.Windows.Forms.Label()
         Me.lblAddress = New DevExpress.XtraEditors.LabelControl()
-        Me.txtBstyle = New System.Windows.Forms.TextBox()
-        Me.lblTin = New System.Windows.Forms.Label()
         Me.txtperiod = New System.Windows.Forms.TextBox()
         Me.lbldatetrans = New DevExpress.XtraEditors.DateEdit()
         Me.txtbal = New System.Windows.Forms.TextBox()
@@ -418,9 +421,12 @@ Partial Class frmor
         '
         'GroupBox2
         '
-        Me.GroupBox2.Controls.Add(Me.lblAddress)
-        Me.GroupBox2.Controls.Add(Me.txtBstyle)
+        Me.GroupBox2.Controls.Add(Me.Label10)
+        Me.GroupBox2.Controls.Add(Me.lblBstyle)
+        Me.GroupBox2.Controls.Add(Me.Label9)
         Me.GroupBox2.Controls.Add(Me.lblTin)
+        Me.GroupBox2.Controls.Add(Me.Label8)
+        Me.GroupBox2.Controls.Add(Me.lblAddress)
         Me.GroupBox2.Controls.Add(Me.txtperiod)
         Me.GroupBox2.Controls.Add(Me.lbldatetrans)
         Me.GroupBox2.Controls.Add(Me.txtbal)
@@ -450,33 +456,68 @@ Partial Class frmor
         Me.GroupBox2.TabStop = False
         Me.GroupBox2.Text = "OR INFO"
         '
-        'lblAddress
+        'Label10
         '
-        Me.lblAddress.Appearance.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Bold)
-        Me.lblAddress.AutoSizeMode = DevExpress.XtraEditors.LabelAutoSizeMode.Vertical
-        Me.lblAddress.Location = New System.Drawing.Point(244, 60)
-        Me.lblAddress.Margin = New System.Windows.Forms.Padding(2, 2, 2, 2)
-        Me.lblAddress.Name = "lblAddress"
-        Me.lblAddress.Size = New System.Drawing.Size(537, 0)
-        Me.lblAddress.TabIndex = 113
+        Me.Label10.AutoSize = True
+        Me.Label10.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label10.ForeColor = System.Drawing.Color.Black
+        Me.Label10.Location = New System.Drawing.Point(775, 62)
+        Me.Label10.Name = "Label10"
+        Me.Label10.Size = New System.Drawing.Size(75, 17)
+        Me.Label10.TabIndex = 118
+        Me.Label10.Text = "BUS. STYLE:"
         '
-        'txtBstyle
+        'lblBstyle
         '
-        Me.txtBstyle.Location = New System.Drawing.Point(514, -2)
-        Me.txtBstyle.Name = "txtBstyle"
-        Me.txtBstyle.Size = New System.Drawing.Size(100, 22)
-        Me.txtBstyle.TabIndex = 112
-        Me.txtBstyle.Visible = False
+        Me.lblBstyle.Appearance.Font = New System.Drawing.Font("Segoe UI", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblBstyle.AutoSizeMode = DevExpress.XtraEditors.LabelAutoSizeMode.Vertical
+        Me.lblBstyle.Location = New System.Drawing.Point(855, 64)
+        Me.lblBstyle.Margin = New System.Windows.Forms.Padding(2)
+        Me.lblBstyle.Name = "lblBstyle"
+        Me.lblBstyle.Size = New System.Drawing.Size(144, 0)
+        Me.lblBstyle.TabIndex = 117
+        '
+        'Label9
+        '
+        Me.Label9.AutoSize = True
+        Me.Label9.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label9.ForeColor = System.Drawing.Color.Black
+        Me.Label9.Location = New System.Drawing.Point(621, 62)
+        Me.Label9.Name = "Label9"
+        Me.Label9.Size = New System.Drawing.Size(43, 17)
+        Me.Label9.TabIndex = 116
+        Me.Label9.Text = "TIN #:"
         '
         'lblTin
         '
-        Me.lblTin.AutoSize = True
-        Me.lblTin.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.lblTin.ForeColor = System.Drawing.Color.Black
-        Me.lblTin.Location = New System.Drawing.Point(596, 37)
+        Me.lblTin.Appearance.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Bold)
+        Me.lblTin.AutoSizeMode = DevExpress.XtraEditors.LabelAutoSizeMode.Vertical
+        Me.lblTin.Location = New System.Drawing.Point(669, 62)
+        Me.lblTin.Margin = New System.Windows.Forms.Padding(2)
         Me.lblTin.Name = "lblTin"
-        Me.lblTin.Size = New System.Drawing.Size(0, 17)
-        Me.lblTin.TabIndex = 111
+        Me.lblTin.Size = New System.Drawing.Size(103, 0)
+        Me.lblTin.TabIndex = 115
+        '
+        'Label8
+        '
+        Me.Label8.AutoSize = True
+        Me.Label8.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label8.ForeColor = System.Drawing.Color.Black
+        Me.Label8.Location = New System.Drawing.Point(241, 62)
+        Me.Label8.Name = "Label8"
+        Me.Label8.Size = New System.Drawing.Size(66, 17)
+        Me.Label8.TabIndex = 114
+        Me.Label8.Text = "ADDRESS:"
+        '
+        'lblAddress
+        '
+        Me.lblAddress.Appearance.Font = New System.Drawing.Font("Segoe UI", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblAddress.AutoSizeMode = DevExpress.XtraEditors.LabelAutoSizeMode.Vertical
+        Me.lblAddress.Location = New System.Drawing.Point(312, 64)
+        Me.lblAddress.Margin = New System.Windows.Forms.Padding(2)
+        Me.lblAddress.Name = "lblAddress"
+        Me.lblAddress.Size = New System.Drawing.Size(304, 0)
+        Me.lblAddress.TabIndex = 113
         '
         'txtperiod
         '
@@ -606,7 +647,7 @@ Partial Class frmor
         Me.Label5.AutoSize = True
         Me.Label5.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label5.ForeColor = System.Drawing.Color.Black
-        Me.Label5.Location = New System.Drawing.Point(693, 11)
+        Me.Label5.Location = New System.Drawing.Point(525, 19)
         Me.Label5.Name = "Label5"
         Me.Label5.Size = New System.Drawing.Size(91, 17)
         Me.Label5.TabIndex = 94
@@ -617,7 +658,7 @@ Partial Class frmor
         Me.txtTime.AutoSize = True
         Me.txtTime.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.txtTime.ForeColor = System.Drawing.Color.Black
-        Me.txtTime.Location = New System.Drawing.Point(795, 11)
+        Me.txtTime.Location = New System.Drawing.Point(622, 19)
         Me.txtTime.Name = "txtTime"
         Me.txtTime.Size = New System.Drawing.Size(74, 17)
         Me.txtTime.TabIndex = 93
@@ -638,7 +679,7 @@ Partial Class frmor
         Me.Label2.AutoSize = True
         Me.Label2.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label2.ForeColor = System.Drawing.Color.Black
-        Me.Label2.Location = New System.Drawing.Point(715, 32)
+        Me.Label2.Location = New System.Drawing.Point(723, 19)
         Me.Label2.Name = "Label2"
         Me.Label2.Size = New System.Drawing.Size(69, 17)
         Me.Label2.TabIndex = 34
@@ -650,7 +691,7 @@ Partial Class frmor
         Me.txtRemarks.Enabled = False
         Me.txtRemarks.Font = New System.Drawing.Font("Segoe UI", 9.75!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.txtRemarks.ForeColor = System.Drawing.Color.Black
-        Me.txtRemarks.Location = New System.Drawing.Point(798, 31)
+        Me.txtRemarks.Location = New System.Drawing.Point(798, 16)
         Me.txtRemarks.MaxLength = 200
         Me.txtRemarks.Multiline = True
         Me.txtRemarks.Name = "txtRemarks"
@@ -1167,6 +1208,9 @@ Partial Class frmor
     Friend WithEvents OfficialReceiptToolStripMenuItem As System.Windows.Forms.ToolStripMenuItem
     Friend WithEvents Timer1 As System.Windows.Forms.Timer
     Friend WithEvents lblAddress As DevExpress.XtraEditors.LabelControl
-    Friend WithEvents txtBstyle As TextBox
-    Friend WithEvents lblTin As Label
+    Friend WithEvents Label9 As Label
+    Friend WithEvents lblTin As DevExpress.XtraEditors.LabelControl
+    Friend WithEvents Label8 As Label
+    Friend WithEvents Label10 As Label
+    Friend WithEvents lblBstyle As DevExpress.XtraEditors.LabelControl
 End Class

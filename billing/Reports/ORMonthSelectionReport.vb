@@ -219,10 +219,10 @@ Public Class ORMonthSelectionReport
 
             'Dim objText11 As CrystalDecisions.CrystalReports.Engine.TextObject = crystal.ReportDefinition.Sections(4).ReportObjects("txtnet")
             'objText11.Text = FormatNumber(CDbl(objText9.Text - objText10.Text), TriState.True)
-           
+
 
             Dim crystal As New OrExcel
-            
+
 
             crystal.SetDataSource(ds)
 
@@ -233,7 +233,7 @@ Public Class ORMonthSelectionReport
             Dim strExportFile As String = SaveFileDialog1.FileName
 
             Dim CrExportOptions As ExportOptions
-            Dim CrDiskFileDestinationOptions As New  _
+            Dim CrDiskFileDestinationOptions As New _
             DiskFileDestinationOptions()
             Dim CrFormatTypeOptions As New ExcelFormatOptions
             CrDiskFileDestinationOptions.DiskFileName = strExportFile
@@ -252,8 +252,8 @@ Public Class ORMonthSelectionReport
             myCon.close()
         Finally
             If (myCon.State = ConnectionState.Open) Then
-                myCon.close()
-            End If
+            myCon.close()
+        End If
         End Try
         myCon.close()
     End Sub

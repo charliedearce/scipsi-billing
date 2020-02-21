@@ -109,13 +109,13 @@ Public Class frmPrintService
             mydate = frmBilling.lbldatetrans.Text
         End If
         e.Graphics.DrawString(frmBilling.txtBillno.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(620, 96)) 'bill
-        e.Graphics.DrawString(frmBilling.txtAccountno.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 125)) 'account
-        e.Graphics.DrawString(frmBilling.lblAccname.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 140)) 'account
+        e.Graphics.DrawString(frmBilling.txtAccountno.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 110)) 'account number
+        e.Graphics.DrawString(frmBilling.lblAccname.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 125)) 'account name
         e.Graphics.DrawString("VESSEL: " + frmBilling.txtVessel.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(80, 200)) 'vessel
         e.Graphics.DrawString("VOYAGE: " + frmBilling.txtVoyage.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(320, 200)) 'voyage
         e.Graphics.DrawString("IN/OUT: " + frmBilling.cbType.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(600, 200)) 'type
-        e.Graphics.DrawString(frmBilling.txtParticulars.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(450, 170)) 'particulars
-        e.Graphics.DrawString(mydate, New Font("Microsoft San Serif", 9), Brushes.Black, New Point(620, 160)) 'date
+        'e.Graphics.DrawString(frmBilling.txtParticulars.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(420, 170)) 'particulars
+        e.Graphics.DrawString(mydate, New Font("Microsoft San Serif", 9), Brushes.Black, New Point(620, 170)) 'date
         e.Graphics.DrawString(frmBilling.txtName.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(590, 445)) 'employee
         e.Graphics.DrawString(qty, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(5, 237)) 'qty
         e.Graphics.DrawString(unit, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(70, 237)) 'unit
@@ -140,6 +140,44 @@ Public Class frmPrintService
 
         e.Graphics.DrawString("TOTAL AMOUNT:" + Environment.NewLine + "DUE TO SCIPSI:", New Font("Microsoft San Serif", 10), Brushes.Black, New Point(600, 370)) 'gross
         e.Graphics.DrawString(frmBilling.txtScipsi.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(610, 409)) 'gross
+
+        'ADDITIONAL FIELDS
+        Dim drawString As [String] = frmBilling.lblAddress.Text
+        ' Create font and brush.
+        Dim drawFont As New Font("Microsoft San Serif", 8)
+        Dim drawBrush As New SolidBrush(Color.Black)
+        ' Create rectangle for drawing.
+        Dim x As Single = 70.0F
+        Dim y As Single = 140.0F
+        Dim width As Single = 400.0F
+        Dim height As Single = 35.0F
+        Dim drawRect As New RectangleF(x, y, width, height)
+
+        Dim drawFormat As New StringFormat()
+        drawFormat.Alignment = StringAlignment.Near
+        ' Draw string to screen.
+        e.Graphics.DrawString(drawString, drawFont, drawBrush,
+        drawRect, drawFormat)
+
+        Dim drawString1 As [String] = frmBilling.txtParticulars.Text
+        ' Create font and brush.
+        Dim drawFont1 As New Font("Microsoft San Serif", 8)
+        Dim drawBrush1 As New SolidBrush(Color.Black)
+        ' Create rectangle for drawing.
+        Dim x1 As Single = 420.0F
+        Dim y1 As Single = 170.0F
+        Dim width1 As Single = 220.0F
+        Dim height1 As Single = 35.0F
+        Dim drawRect1 As New RectangleF(x1, y1, width1, height1)
+
+        Dim drawFormat1 As New StringFormat()
+        drawFormat.Alignment = StringAlignment.Near
+        ' Draw string to screen.
+        e.Graphics.DrawString(drawString1, drawFont1, drawBrush1,
+        drawRect1, drawFormat1)
+
+        e.Graphics.DrawString(frmBilling.lblBstyle.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(70, 170)) 'bus style
+        e.Graphics.DrawString(frmBilling.lblTin.Text, New Font("Microsoft San Serif", 8), Brushes.Black, New Point(70, 185)) 'tin no
     End Sub
 
 

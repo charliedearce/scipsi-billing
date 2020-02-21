@@ -22,12 +22,15 @@ Partial Class frmPrintBill
     'Do not modify it using the code editor.
     <System.Diagnostics.DebuggerStepThrough()> _
     Private Sub InitializeComponent()
-        Dim DataGridViewCellStyle1 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
-        Dim DataGridViewCellStyle2 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
-        Dim DataGridViewCellStyle3 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
-        Dim DataGridViewCellStyle4 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
+        Dim DataGridViewCellStyle17 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
+        Dim DataGridViewCellStyle18 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
+        Dim DataGridViewCellStyle19 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
+        Dim DataGridViewCellStyle20 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
         Me.PrintDocument1 = New System.Drawing.Printing.PrintDocument()
         Me.Panel1 = New System.Windows.Forms.Panel()
+        Me.lblBstyle = New System.Windows.Forms.Label()
+        Me.lblTin = New System.Windows.Forms.Label()
+        Me.lblAddress = New System.Windows.Forms.Label()
         Me.cargodesc = New System.Windows.Forms.ListBox()
         Me.grossbox = New System.Windows.Forms.ListBox()
         Me.ratebox = New System.Windows.Forms.ListBox()
@@ -55,9 +58,6 @@ Partial Class frmPrintBill
         Me.lblBillingname = New System.Windows.Forms.Label()
         Me.Label5 = New System.Windows.Forms.Label()
         Me.DataGridPrint = New System.Windows.Forms.DataGridView()
-        Me.lblBstyle = New System.Windows.Forms.Label()
-        Me.lblTin = New System.Windows.Forms.Label()
-        Me.lblAddress = New System.Windows.Forms.Label()
         Me.Panel1.SuspendLayout()
         CType(Me.DataGridPrint, System.ComponentModel.ISupportInitialize).BeginInit()
         Me.SuspendLayout()
@@ -101,17 +101,50 @@ Partial Class frmPrintBill
         Me.Panel1.Controls.Add(Me.DataGridPrint)
         Me.Panel1.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Panel1.Location = New System.Drawing.Point(5, 0)
-        Me.Panel1.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.Panel1.Margin = New System.Windows.Forms.Padding(4)
         Me.Panel1.Name = "Panel1"
         Me.Panel1.Size = New System.Drawing.Size(1152, 768)
         Me.Panel1.TabIndex = 1
+        '
+        'lblBstyle
+        '
+        Me.lblBstyle.AutoSize = True
+        Me.lblBstyle.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblBstyle.Location = New System.Drawing.Point(128, 224)
+        Me.lblBstyle.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
+        Me.lblBstyle.Name = "lblBstyle"
+        Me.lblBstyle.Size = New System.Drawing.Size(46, 17)
+        Me.lblBstyle.TabIndex = 66
+        Me.lblBstyle.Text = "Bstyle"
+        '
+        'lblTin
+        '
+        Me.lblTin.AutoSize = True
+        Me.lblTin.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblTin.Location = New System.Drawing.Point(128, 252)
+        Me.lblTin.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
+        Me.lblTin.Name = "lblTin"
+        Me.lblTin.Size = New System.Drawing.Size(28, 17)
+        Me.lblTin.TabIndex = 65
+        Me.lblTin.Text = "Tin"
+        '
+        'lblAddress
+        '
+        Me.lblAddress.AutoSize = True
+        Me.lblAddress.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblAddress.Location = New System.Drawing.Point(128, 196)
+        Me.lblAddress.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
+        Me.lblAddress.Name = "lblAddress"
+        Me.lblAddress.Size = New System.Drawing.Size(60, 17)
+        Me.lblAddress.TabIndex = 64
+        Me.lblAddress.Text = "Address"
         '
         'cargodesc
         '
         Me.cargodesc.FormattingEnabled = True
         Me.cargodesc.ItemHeight = 17
         Me.cargodesc.Location = New System.Drawing.Point(980, 17)
-        Me.cargodesc.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.cargodesc.Margin = New System.Windows.Forms.Padding(4)
         Me.cargodesc.Name = "cargodesc"
         Me.cargodesc.Size = New System.Drawing.Size(159, 106)
         Me.cargodesc.TabIndex = 57
@@ -121,7 +154,7 @@ Partial Class frmPrintBill
         Me.grossbox.FormattingEnabled = True
         Me.grossbox.ItemHeight = 17
         Me.grossbox.Location = New System.Drawing.Point(865, 15)
-        Me.grossbox.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.grossbox.Margin = New System.Windows.Forms.Padding(4)
         Me.grossbox.Name = "grossbox"
         Me.grossbox.Size = New System.Drawing.Size(159, 106)
         Me.grossbox.TabIndex = 56
@@ -131,7 +164,7 @@ Partial Class frmPrintBill
         Me.ratebox.FormattingEnabled = True
         Me.ratebox.ItemHeight = 17
         Me.ratebox.Location = New System.Drawing.Point(697, 17)
-        Me.ratebox.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.ratebox.Margin = New System.Windows.Forms.Padding(4)
         Me.ratebox.Name = "ratebox"
         Me.ratebox.Size = New System.Drawing.Size(159, 106)
         Me.ratebox.TabIndex = 55
@@ -141,7 +174,7 @@ Partial Class frmPrintBill
         Me.cargobox.FormattingEnabled = True
         Me.cargobox.ItemHeight = 17
         Me.cargobox.Location = New System.Drawing.Point(529, 17)
-        Me.cargobox.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.cargobox.Margin = New System.Windows.Forms.Padding(4)
         Me.cargobox.Name = "cargobox"
         Me.cargobox.Size = New System.Drawing.Size(159, 106)
         Me.cargobox.TabIndex = 54
@@ -151,7 +184,7 @@ Partial Class frmPrintBill
         Me.servicebox.FormattingEnabled = True
         Me.servicebox.ItemHeight = 17
         Me.servicebox.Location = New System.Drawing.Point(360, 17)
-        Me.servicebox.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.servicebox.Margin = New System.Windows.Forms.Padding(4)
         Me.servicebox.Name = "servicebox"
         Me.servicebox.Size = New System.Drawing.Size(159, 106)
         Me.servicebox.TabIndex = 53
@@ -161,7 +194,7 @@ Partial Class frmPrintBill
         Me.unitbox.FormattingEnabled = True
         Me.unitbox.ItemHeight = 17
         Me.unitbox.Location = New System.Drawing.Point(192, 17)
-        Me.unitbox.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.unitbox.Margin = New System.Windows.Forms.Padding(4)
         Me.unitbox.Name = "unitbox"
         Me.unitbox.Size = New System.Drawing.Size(159, 106)
         Me.unitbox.TabIndex = 52
@@ -171,7 +204,7 @@ Partial Class frmPrintBill
         Me.qtybox.FormattingEnabled = True
         Me.qtybox.ItemHeight = 17
         Me.qtybox.Location = New System.Drawing.Point(24, 17)
-        Me.qtybox.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.qtybox.Margin = New System.Windows.Forms.Padding(4)
         Me.qtybox.Name = "qtybox"
         Me.qtybox.Size = New System.Drawing.Size(159, 106)
         Me.qtybox.TabIndex = 51
@@ -388,84 +421,51 @@ Partial Class frmPrintBill
         '
         Me.DataGridPrint.AllowUserToAddRows = False
         Me.DataGridPrint.AllowUserToDeleteRows = False
-        DataGridViewCellStyle1.BackColor = System.Drawing.Color.White
-        Me.DataGridPrint.AlternatingRowsDefaultCellStyle = DataGridViewCellStyle1
+        DataGridViewCellStyle17.BackColor = System.Drawing.Color.White
+        Me.DataGridPrint.AlternatingRowsDefaultCellStyle = DataGridViewCellStyle17
         Me.DataGridPrint.BackgroundColor = System.Drawing.Color.White
         Me.DataGridPrint.BorderStyle = System.Windows.Forms.BorderStyle.None
         Me.DataGridPrint.ColumnHeadersBorderStyle = System.Windows.Forms.DataGridViewHeaderBorderStyle.[Single]
-        DataGridViewCellStyle2.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter
-        DataGridViewCellStyle2.BackColor = System.Drawing.Color.White
-        DataGridViewCellStyle2.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        DataGridViewCellStyle2.ForeColor = System.Drawing.SystemColors.ControlText
-        DataGridViewCellStyle2.SelectionBackColor = System.Drawing.Color.LightSteelBlue
-        DataGridViewCellStyle2.SelectionForeColor = System.Drawing.SystemColors.HighlightText
-        DataGridViewCellStyle2.WrapMode = System.Windows.Forms.DataGridViewTriState.[True]
-        Me.DataGridPrint.ColumnHeadersDefaultCellStyle = DataGridViewCellStyle2
+        DataGridViewCellStyle18.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter
+        DataGridViewCellStyle18.BackColor = System.Drawing.Color.White
+        DataGridViewCellStyle18.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        DataGridViewCellStyle18.ForeColor = System.Drawing.SystemColors.ControlText
+        DataGridViewCellStyle18.SelectionBackColor = System.Drawing.Color.LightSteelBlue
+        DataGridViewCellStyle18.SelectionForeColor = System.Drawing.SystemColors.HighlightText
+        DataGridViewCellStyle18.WrapMode = System.Windows.Forms.DataGridViewTriState.[True]
+        Me.DataGridPrint.ColumnHeadersDefaultCellStyle = DataGridViewCellStyle18
         Me.DataGridPrint.ColumnHeadersHeight = 24
         Me.DataGridPrint.Cursor = System.Windows.Forms.Cursors.Hand
         Me.DataGridPrint.EnableHeadersVisualStyles = False
         Me.DataGridPrint.GridColor = System.Drawing.Color.White
         Me.DataGridPrint.Location = New System.Drawing.Point(75, 341)
-        Me.DataGridPrint.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.DataGridPrint.Margin = New System.Windows.Forms.Padding(4)
         Me.DataGridPrint.MultiSelect = False
         Me.DataGridPrint.Name = "DataGridPrint"
         Me.DataGridPrint.ReadOnly = True
         Me.DataGridPrint.RowHeadersBorderStyle = System.Windows.Forms.DataGridViewHeaderBorderStyle.[Single]
-        DataGridViewCellStyle3.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft
-        DataGridViewCellStyle3.BackColor = System.Drawing.Color.White
-        DataGridViewCellStyle3.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        DataGridViewCellStyle3.ForeColor = System.Drawing.Color.White
-        DataGridViewCellStyle3.SelectionBackColor = System.Drawing.Color.White
-        DataGridViewCellStyle3.SelectionForeColor = System.Drawing.SystemColors.HighlightText
-        DataGridViewCellStyle3.WrapMode = System.Windows.Forms.DataGridViewTriState.[True]
-        Me.DataGridPrint.RowHeadersDefaultCellStyle = DataGridViewCellStyle3
+        DataGridViewCellStyle19.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft
+        DataGridViewCellStyle19.BackColor = System.Drawing.Color.White
+        DataGridViewCellStyle19.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        DataGridViewCellStyle19.ForeColor = System.Drawing.Color.White
+        DataGridViewCellStyle19.SelectionBackColor = System.Drawing.Color.White
+        DataGridViewCellStyle19.SelectionForeColor = System.Drawing.SystemColors.HighlightText
+        DataGridViewCellStyle19.WrapMode = System.Windows.Forms.DataGridViewTriState.[True]
+        Me.DataGridPrint.RowHeadersDefaultCellStyle = DataGridViewCellStyle19
         Me.DataGridPrint.RowHeadersVisible = False
         Me.DataGridPrint.RowHeadersWidth = 25
         Me.DataGridPrint.RowHeadersWidthSizeMode = System.Windows.Forms.DataGridViewRowHeadersWidthSizeMode.DisableResizing
-        DataGridViewCellStyle4.BackColor = System.Drawing.Color.White
-        DataGridViewCellStyle4.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        DataGridViewCellStyle4.ForeColor = System.Drawing.Color.Black
-        DataGridViewCellStyle4.SelectionBackColor = System.Drawing.Color.White
-        DataGridViewCellStyle4.SelectionForeColor = System.Drawing.Color.Black
-        Me.DataGridPrint.RowsDefaultCellStyle = DataGridViewCellStyle4
+        DataGridViewCellStyle20.BackColor = System.Drawing.Color.White
+        DataGridViewCellStyle20.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        DataGridViewCellStyle20.ForeColor = System.Drawing.Color.Black
+        DataGridViewCellStyle20.SelectionBackColor = System.Drawing.Color.White
+        DataGridViewCellStyle20.SelectionForeColor = System.Drawing.Color.Black
+        Me.DataGridPrint.RowsDefaultCellStyle = DataGridViewCellStyle20
         Me.DataGridPrint.RowTemplate.Height = 18
         Me.DataGridPrint.RowTemplate.Resizable = System.Windows.Forms.DataGridViewTriState.[False]
         Me.DataGridPrint.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.CellSelect
         Me.DataGridPrint.Size = New System.Drawing.Size(1001, 199)
         Me.DataGridPrint.TabIndex = 40
-        '
-        'lblBstyle
-        '
-        Me.lblBstyle.AutoSize = True
-        Me.lblBstyle.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.lblBstyle.Location = New System.Drawing.Point(128, 224)
-        Me.lblBstyle.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
-        Me.lblBstyle.Name = "lblBstyle"
-        Me.lblBstyle.Size = New System.Drawing.Size(46, 17)
-        Me.lblBstyle.TabIndex = 66
-        Me.lblBstyle.Text = "Bstyle"
-        '
-        'lblTin
-        '
-        Me.lblTin.AutoSize = True
-        Me.lblTin.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.lblTin.Location = New System.Drawing.Point(128, 252)
-        Me.lblTin.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
-        Me.lblTin.Name = "lblTin"
-        Me.lblTin.Size = New System.Drawing.Size(28, 17)
-        Me.lblTin.TabIndex = 65
-        Me.lblTin.Text = "Tin"
-        '
-        'lblAddress
-        '
-        Me.lblAddress.AutoSize = True
-        Me.lblAddress.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.lblAddress.Location = New System.Drawing.Point(128, 196)
-        Me.lblAddress.Margin = New System.Windows.Forms.Padding(4, 0, 4, 0)
-        Me.lblAddress.Name = "lblAddress"
-        Me.lblAddress.Size = New System.Drawing.Size(60, 17)
-        Me.lblAddress.TabIndex = 64
-        Me.lblAddress.Text = "Address"
         '
         'frmPrintBill
         '
@@ -473,7 +473,7 @@ Partial Class frmPrintBill
         Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
         Me.ClientSize = New System.Drawing.Size(1161, 772)
         Me.Controls.Add(Me.Panel1)
-        Me.Margin = New System.Windows.Forms.Padding(4, 4, 4, 4)
+        Me.Margin = New System.Windows.Forms.Padding(4)
         Me.Name = "frmPrintBill"
         Me.Text = "frmPrintBill"
         Me.Panel1.ResumeLayout(False)

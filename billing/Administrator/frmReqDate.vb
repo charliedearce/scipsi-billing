@@ -33,11 +33,11 @@
     Private Sub DataGridView1_CellMouseClick(sender As Object, e As DataGridViewCellMouseEventArgs) Handles DataGridView1.CellMouseClick
         On Error Resume Next
         Dim myindex As Integer = DataGridView1.CurrentRow.Index
-        mydate = DataGridView1.Item(0, myindex).Value
-        reqby = DataGridView1.Item(1, myindex).Value
-        status = DataGridView1.Item(2, myindex).Value
-        myid = DataGridView1.Item(4, myindex).Value
-        reason = DataGridView1.Item(5, myindex).Value
+        myid = DataGridView1.Item(0, myindex).Value
+        mydate = DataGridView1.Item(1, myindex).Value
+        status = DataGridView1.Item(5, myindex).Value
+        reqby = DataGridView1.Item(2, myindex).Value
+        reason = DataGridView1.Item(4, myindex).Value
     End Sub
 
     Private Sub SimpleButton3_Click(sender As Object, e As EventArgs) Handles SimpleButton3.Click
