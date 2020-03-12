@@ -110,7 +110,7 @@ Public Class frmPrintOR
         e.Graphics.DrawString(netbill, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(260, 310)) 'chcke number
 
         If (lblVat.Text <> 0) Then
-            e.Graphics.DrawString(lblVat.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(540, 300)) 'vat sales
+            e.Graphics.DrawString(lblAmt.Text - lblVat.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(540, 300)) 'vat sales
         Else
             e.Graphics.DrawString(lblAmt.Text, New Font("Microsoft San Serif", 10), Brushes.Black, New Point(540, 340)) 'zero rated sales
         End If
