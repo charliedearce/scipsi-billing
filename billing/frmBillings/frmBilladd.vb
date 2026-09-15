@@ -79,7 +79,6 @@
 
 
     Private Sub frmBilladd_Load(sender As Object, e As EventArgs) Handles MyBase.Load
-
         Me.KeyPreview = True
     End Sub
 
@@ -223,9 +222,16 @@
         NumberFormat(txtRateTemp)
     End Sub
 
+    Private Sub radBtnDanger_Click(sender As Object, e As EventArgs) Handles radBtnDanger.Click
+        qtyvalidate()
+    End Sub
 
-    Private Sub lblUnit_Click(sender As Object, e As EventArgs) Handles lblUnit.Click
+    Private Sub radBtnFS_Click(sender As Object, e As EventArgs) Handles radBtnFS.Click
+        qtyvalidate()
+    End Sub
 
+    Private Sub radBtnFS_CheckedChanged(sender As Object, e As EventArgs) Handles radBtnFS.CheckedChanged
+        frmBilling.ppa.Checked = False
     End Sub
 End Class
 

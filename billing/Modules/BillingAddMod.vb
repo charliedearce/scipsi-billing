@@ -214,8 +214,14 @@ Module BillingAddMod
                     frmBilladd.txtGross.Text = frmBilladd.txtGrosstemp.Text
                     frmBilladd.txtRate.Text = frmBilladd.txtRateTemp.Text
                 Else
-                    frmBilladd.txtGross.Text = Decimal.Parse(frmBilladd.txtGrosstemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text)
-                    frmBilladd.txtRate.Text = Decimal.Parse(frmBilladd.txtRateTemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text)
+                    If frmBilladd.radBtnFS.Checked = True Then
+                        frmBilladd.txtGross.Text = Math.Truncate(Decimal.Parse(frmBilladd.txtGrosstemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text))
+                        frmBilladd.txtRate.Text = Math.Truncate(Decimal.Parse(frmBilladd.txtRateTemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text))
+                    Else
+                        frmBilladd.txtGross.Text = Decimal.Parse(frmBilladd.txtGrosstemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text)
+                        frmBilladd.txtRate.Text = Decimal.Parse(frmBilladd.txtRateTemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text)
+                    End If
+
                 End If
                 'frmBilladd.scipsi.Text =
                 frmBilling.txtNotice.Text = ""
@@ -241,8 +247,10 @@ Module BillingAddMod
             frmBilladd.lblCargo.Text = ""
             frmBilladd.lblUnit.Text = ""
 
-            If frmBilladd.txtDanger.Text <> 0 Then
+            If frmBilladd.txtDanger.Text <> 0 And frmBilladd.radBtnDanger.Checked = True Then
                 frmBilling.txtParticulars.Text = "DANGER " + danger.Trim(".")
+            ElseIf frmBilladd.txtDanger.Text <> 0 And frmBilladd.radBtnFS.Checked = True Then
+                frmBilling.txtParticulars.Text = "FUEL SURCHARGE " + danger.Trim(".")
             Else
                 frmBilling.txtParticulars.Text = ""
             End If

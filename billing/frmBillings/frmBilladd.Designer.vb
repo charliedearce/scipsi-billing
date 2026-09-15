@@ -25,9 +25,10 @@ Partial Class frmBilladd
         Dim resources As System.ComponentModel.ComponentResourceManager = New System.ComponentModel.ComponentResourceManager(GetType(frmBilladd))
         Me.Label12 = New System.Windows.Forms.Label()
         Me.GroupBox1 = New System.Windows.Forms.GroupBox()
+        Me.radBtnFS = New System.Windows.Forms.RadioButton()
+        Me.radBtnDanger = New System.Windows.Forms.RadioButton()
         Me.txtRateTemp = New System.Windows.Forms.TextBox()
         Me.txtGrosstemp = New System.Windows.Forms.TextBox()
-        Me.Label4 = New System.Windows.Forms.Label()
         Me.txtDanger = New System.Windows.Forms.TextBox()
         Me.txtDisc = New System.Windows.Forms.TextBox()
         Me.charge = New System.Windows.Forms.TextBox()
@@ -58,18 +59,19 @@ Partial Class frmBilladd
         'Label12
         '
         Me.Label12.AutoSize = True
-        Me.Label12.Font = New System.Drawing.Font("Arial Narrow", 20.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label12.Font = New System.Drawing.Font("Microsoft Sans Serif", 20.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label12.Location = New System.Drawing.Point(-197, 132)
         Me.Label12.Name = "Label12"
-        Me.Label12.Size = New System.Drawing.Size(133, 31)
+        Me.Label12.Size = New System.Drawing.Size(161, 31)
         Me.Label12.TabIndex = 53
         Me.Label12.Text = "QUANTITY:"
         '
         'GroupBox1
         '
+        Me.GroupBox1.Controls.Add(Me.radBtnFS)
+        Me.GroupBox1.Controls.Add(Me.radBtnDanger)
         Me.GroupBox1.Controls.Add(Me.txtRateTemp)
         Me.GroupBox1.Controls.Add(Me.txtGrosstemp)
-        Me.GroupBox1.Controls.Add(Me.Label4)
         Me.GroupBox1.Controls.Add(Me.txtDanger)
         Me.GroupBox1.Controls.Add(Me.txtDisc)
         Me.GroupBox1.Controls.Add(Me.charge)
@@ -101,6 +103,30 @@ Partial Class frmBilladd
         Me.GroupBox1.TabStop = False
         Me.GroupBox1.Text = "ITEM INFO"
         '
+        'radBtnFS
+        '
+        Me.radBtnFS.AutoSize = True
+        Me.radBtnFS.Font = New System.Drawing.Font("Segoe UI", 20.25!)
+        Me.radBtnFS.Location = New System.Drawing.Point(161, 174)
+        Me.radBtnFS.Name = "radBtnFS"
+        Me.radBtnFS.Size = New System.Drawing.Size(252, 41)
+        Me.radBtnFS.TabIndex = 6
+        Me.radBtnFS.Text = "FUEL SURCHARGE"
+        Me.radBtnFS.UseVisualStyleBackColor = True
+        '
+        'radBtnDanger
+        '
+        Me.radBtnDanger.AutoSize = True
+        Me.radBtnDanger.Checked = True
+        Me.radBtnDanger.Font = New System.Drawing.Font("Segoe UI", 20.25!)
+        Me.radBtnDanger.Location = New System.Drawing.Point(16, 174)
+        Me.radBtnDanger.Name = "radBtnDanger"
+        Me.radBtnDanger.Size = New System.Drawing.Size(139, 41)
+        Me.radBtnDanger.TabIndex = 5
+        Me.radBtnDanger.TabStop = True
+        Me.radBtnDanger.Text = "DANGER"
+        Me.radBtnDanger.UseVisualStyleBackColor = True
+        '
         'txtRateTemp
         '
         Me.txtRateTemp.Location = New System.Drawing.Point(524, 0)
@@ -119,27 +145,17 @@ Partial Class frmBilladd
         Me.txtGrosstemp.Text = "0"
         Me.txtGrosstemp.Visible = False
         '
-        'Label4
-        '
-        Me.Label4.AutoSize = True
-        Me.Label4.Font = New System.Drawing.Font("Segoe UI", 20.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
-        Me.Label4.Location = New System.Drawing.Point(6, 170)
-        Me.Label4.Name = "Label4"
-        Me.Label4.Size = New System.Drawing.Size(157, 37)
-        Me.Label4.TabIndex = 91
-        Me.Label4.Text = "DANGER %:"
-        '
         'txtDanger
         '
         Me.txtDanger.BorderStyle = System.Windows.Forms.BorderStyle.None
         Me.txtDanger.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper
         Me.txtDanger.Font = New System.Drawing.Font("Segoe UI", 20.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.txtDanger.ForeColor = System.Drawing.Color.Red
-        Me.txtDanger.Location = New System.Drawing.Point(208, 170)
+        Me.txtDanger.Location = New System.Drawing.Point(419, 176)
         Me.txtDanger.MaxLength = 4
         Me.txtDanger.Name = "txtDanger"
         Me.txtDanger.Size = New System.Drawing.Size(50, 36)
-        Me.txtDanger.TabIndex = 6
+        Me.txtDanger.TabIndex = 7
         Me.txtDanger.Text = "0"
         '
         'txtDisc
@@ -220,7 +236,7 @@ Partial Class frmBilladd
         Me.Label2.Font = New System.Drawing.Font("Segoe UI", 20.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label2.Location = New System.Drawing.Point(6, 108)
         Me.Label2.Name = "Label2"
-        Me.Label2.Size = New System.Drawing.Size(187, 37)
+        Me.Label2.Size = New System.Drawing.Size(188, 37)
         Me.Label2.TabIndex = 83
         Me.Label2.Text = "SERVICE TYPE:"
         '
@@ -317,7 +333,7 @@ Partial Class frmBilladd
         'lblCargo
         '
         Me.lblCargo.AutoSize = True
-        Me.lblCargo.Font = New System.Drawing.Font("Arial Narrow", 20.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblCargo.Font = New System.Drawing.Font("Microsoft Sans Serif", 20.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.lblCargo.ForeColor = System.Drawing.Color.Red
         Me.lblCargo.Location = New System.Drawing.Point(314, 46)
         Me.lblCargo.Name = "lblCargo"
@@ -352,7 +368,7 @@ Partial Class frmBilladd
         Me.Label16.Font = New System.Drawing.Font("Segoe UI", 36.0!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label16.Location = New System.Drawing.Point(2, 208)
         Me.Label16.Name = "Label16"
-        Me.Label16.Size = New System.Drawing.Size(147, 65)
+        Me.Label16.Size = New System.Drawing.Size(144, 65)
         Me.Label16.TabIndex = 71
         Me.Label16.Text = "RATE:"
         '
@@ -372,7 +388,7 @@ Partial Class frmBilladd
         Me.Label14.Font = New System.Drawing.Font("Segoe UI", 20.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
         Me.Label14.Location = New System.Drawing.Point(6, 77)
         Me.Label14.Name = "Label14"
-        Me.Label14.Size = New System.Drawing.Size(199, 37)
+        Me.Label14.Size = New System.Drawing.Size(198, 37)
         Me.Label14.TabIndex = 69
         Me.Label14.Text = "SERVICE CODE:"
         '
@@ -445,9 +461,10 @@ Partial Class frmBilladd
     Friend WithEvents ppa As System.Windows.Forms.TextBox
     Friend WithEvents charge As System.Windows.Forms.TextBox
     Friend WithEvents txtGrosstemp As System.Windows.Forms.TextBox
-    Friend WithEvents Label4 As System.Windows.Forms.Label
     Friend WithEvents txtDanger As System.Windows.Forms.TextBox
     Friend WithEvents txtRateTemp As System.Windows.Forms.TextBox
     Friend WithEvents txtDisc As System.Windows.Forms.TextBox
     Friend WithEvents Label3 As System.Windows.Forms.Label
+    Friend WithEvents radBtnFS As RadioButton
+    Friend WithEvents radBtnDanger As RadioButton
 End Class
