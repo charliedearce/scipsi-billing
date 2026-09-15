@@ -160,7 +160,7 @@ Public Class frmBilling
                 btnUpdate.Visible = False
                 btnEdit.Visible = False
             Else
-                frmPrintService.Show()
+                ServicePrintTemplateService.PrintBill(txtBillno.Text, Me)
                 btnUpdate.Visible = False
                 btnEdit.Visible = False
             End If

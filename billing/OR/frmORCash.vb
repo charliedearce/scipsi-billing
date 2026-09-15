@@ -54,20 +54,7 @@ Public Class frmORCash
                 ElseIf Decimal.Parse(txtCash.Text) >= Decimal.Parse(txtTotalDue.Text) And txtCash.Focus = True Then
 
                     frmor.txtNotice.Text = ""
-                    frmPrintOR.lblclient.Text = frmor.lblAccname.Text
-
                     With frmor
-                        frmPrintOR.lblVat.Text = .txtORVat.Text
-                        frmPrintOR.lblAmt.Text = .txtORBillAmount.Text
-                        frmPrintOR.lblTax.Text = .txtHTax.Text
-                        frmPrintOR.lblTotal.Text = .txtNetIncome.Text
-                        frmPrintOR.lblCash.Text = txtCash.Text
-
-                        frmPrintOR.lblChange.Text = txtCash.Text - txtTotalDue.Text
-
-                        frmPrintOR.lblclient.Text = .lblAccname.Text
-                        frmPrintOR.txtword.Text = SpellNumber(.txtNetIncome.Text)
-                        frmPrintOR.lblval.Text = .txtNetIncome.Text
                         .txtOrno.Enabled = False
                         .txtAccountno.Enabled = False
                         .txtRemarks.Enabled = False
@@ -75,10 +62,11 @@ Public Class frmORCash
                         .btnNewOR.Enabled = True
                     End With
                     Dim result As Integer = MessageBox.Show("You want to Print this transaction?", "Caution!", MessageBoxButtons.YesNo)
-                    If result = DialogResult.Yes Then
-                        frmPrintOR.Show()
-                    End If
+                    Dim receiptNumber As String = frmor.txtOrno.Text
                     AddOR()
+                    If result = DialogResult.Yes Then
+                        OrPrintTemplateService.PrintReceipt(receiptNumber, frmor)
+                    End If
                     viewORItems()
                     txtCash.Text = ""
 
@@ -89,26 +77,13 @@ Public Class frmORCash
                     frmor.txtNotice.Text = "Please enter Check number."
                 Else
                     frmor.txtNotice.Text = ""
-                    With frmor
-                        frmPrintOR.lblVat.Text = .txtORVat.Text
-                        frmPrintOR.lblAmt.Text = .txtORBillAmount.Text
-                        frmPrintOR.lblTax.Text = .txtHTax.Text
-                        frmPrintOR.lblTotal.Text = .txtNetIncome.Text
-                        frmPrintOR.lblclient.Text = .lblAccname.Text
-                        frmPrintOR.txtword.Text = SpellNumber(.txtNetIncome.Text)
-                        frmPrintOR.lblval.Text = .txtNetIncome.Text
-
-                        frmPrintOR.lblCash.Text = txtChkTotalDue.Text
-                        frmPrintOR.lblChange.Text = 0
-                    End With
                     txtCash.Text = txtChkTotalDue.Text
-
-                    frmPrintOR.txtCheck.Text = txtCheckno.Text
                     Dim result As Integer = MessageBox.Show("You want to Print this transaction?", "Caution!", MessageBoxButtons.YesNo)
-                    If result = DialogResult.Yes Then
-                        frmPrintOR.Show()
-                    End If
+                    Dim receiptNumber As String = frmor.txtOrno.Text
                     AddOR()
+                    If result = DialogResult.Yes Then
+                        OrPrintTemplateService.PrintReceipt(receiptNumber, frmor)
+                    End If
                     viewORItems()
 
                     With frmor

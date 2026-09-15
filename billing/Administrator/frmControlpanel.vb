@@ -1,5 +1,8 @@
 ﻿Imports AutoUpdaterDotNET
 Public Class frmControlpanel
+    Private orPrintDesignerItem As DevExpress.XtraBars.BarButtonItem
+    Private servicePrintDesignerItem As DevExpress.XtraBars.BarButtonItem
+
     Protected Overrides ReadOnly Property CreateParams() As CreateParams
         Get
             Dim param As CreateParams = MyBase.CreateParams
@@ -68,7 +71,25 @@ Public Class frmControlpanel
     End Sub
 
     Private Sub frmControlpanel_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+        If orPrintDesignerItem Is Nothing Then
+            orPrintDesignerItem = New DevExpress.XtraBars.BarButtonItem(barManager1, "OR Print Designer")
+            BarSubItem15.AddItem(orPrintDesignerItem)
+            AddHandler orPrintDesignerItem.ItemClick, AddressOf orPrintDesignerItem_ItemClick
+        End If
 
+        If servicePrintDesignerItem Is Nothing Then
+            servicePrintDesignerItem = New DevExpress.XtraBars.BarButtonItem(barManager1, "Service Print Designer")
+            BarSubItem15.AddItem(servicePrintDesignerItem)
+            AddHandler servicePrintDesignerItem.ItemClick, AddressOf servicePrintDesignerItem_ItemClick
+        End If
+    End Sub
+
+    Private Sub orPrintDesignerItem_ItemClick(ByVal sender As Object, ByVal e As DevExpress.XtraBars.ItemClickEventArgs)
+        OrPrintTemplateService.DesignTemplate(Me)
+    End Sub
+
+    Private Sub servicePrintDesignerItem_ItemClick(ByVal sender As Object, ByVal e As DevExpress.XtraBars.ItemClickEventArgs)
+        ServicePrintTemplateService.DesignTemplate(Me)
     End Sub
 
     Private Sub BarButtonItem15_ItemClick(sender As Object, e As DevExpress.XtraBars.ItemClickEventArgs) Handles BarButtonItem15.ItemClick

@@ -143,31 +143,12 @@
     End Sub
 
     Private Sub btnPrintOr_Click(sender As Object, e As EventArgs) Handles btnPrintOr.Click
-
-        txtSearchIndicator.Text = 1
-
-        frmPrintOR.txtCheck.Text = txtCheckno.Text
-        frmPrintOR.lblVat.Text = txtORVat.Text
-        frmPrintOR.lblAmt.Text = txtORBillAmount.Text
-        frmPrintOR.lblTax.Text = txtHTax.Text
-        frmPrintOR.lblTotal.Text = txtNetIncome.Text
-
-
-        frmPrintOR.txtword.Text = SpellNumber(txtNetIncome.Text)
-        frmPrintOR.lblval.Text = txtNetIncome.Text
-
-        frmPrintOR.lblclient.Text = lblAccname.Text
-
-        'NEW OR FIELDS
-        'frmPrintOR.lblAddress.Text = lblAddress.Text
-        'frmPrintOR.lblTin.Text = lblTin.Text
-        'frmPrintOR.lblBstyle.Text = txtBstyle.Text
-
         Dim result As Integer = MessageBox.Show("You want to Print this transaction?", "Caution!", MessageBoxButtons.YesNo)
         If result = DialogResult.Yes Then
+            txtSearchIndicator.Text = 1
             btnUpdate.Visible = False
             btnEdit.Visible = False
-            frmPrintOR.Show()
+            OrPrintTemplateService.PrintReceipt(txtOrno.Text, Me)
         End If
     End Sub
 
