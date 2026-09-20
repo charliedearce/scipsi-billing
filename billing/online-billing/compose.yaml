@@ -1,0 +1,141 @@
+name: scipsi-online-billing-dev
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    environment:
+      POSTGRES_DB: online_billing_dev
+      POSTGRES_USER: online_billing_dev
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U online_billing_dev -d online_billing_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  redis:
+    image: redis:8-alpine@sha256:978f0e01593e65eed801f2402944efcd936d43b5027e4908a7897baf88ed6241
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:56379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  api:
+    profiles: ["app"]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/api/.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: online_billing_dev
+      DB_USERNAME: online_billing_dev
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+      REVERB_SERVER_HOST: 0.0.0.0
+      REVERB_SERVER_PORT: 8080
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18000:8000"
+  worker:
+    profiles: ["app"]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/api/.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: online_billing_dev
+      DB_USERNAME: online_billing_dev
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["php", "artisan", "queue:work", "redis", "--queue=default", "--sleep=1", "--tries=1", "--timeout=120"]
+  scheduler:
+    profiles: ["app"]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/api/.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: online_billing_dev
+      DB_USERNAME: online_billing_dev
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["php", "artisan", "schedule:work"]
+  reverb:
+    profiles: ["app"]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/api/.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: online_billing_dev
+      DB_USERNAME: online_billing_dev
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REVERB_SERVER_HOST: 0.0.0.0
+      REVERB_SERVER_PORT: 8080
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:58080:8080"
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+secrets:
+  postgres_password:
+    file: ./.local/postgres-password
+volumes:
+  postgres_data:
+  redis_data:

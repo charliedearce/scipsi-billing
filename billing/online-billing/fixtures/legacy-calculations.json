@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "provenance": "Synthetic inputs; expectations derived from source review and independently checked arithmetic. Not verified by executing legacy UI or approved as accounting policy.",
+  "rates_are_synthetic": true,
+  "cases": [
+    {"id":"LINE-DOM-PPA-VAT","kind":"line","source":"Modules/BillingAddMod.vb::computation","input":{"gross":"1000","ppa_rate":"0.10","vat_rate":"0.12","ppa":true,"vat":true,"marker_percent":"0"},"expected":{"ppa":"100","discount":"0","net":"900","tax":"108","scipsi":"1008","charge":"1108"}},
+    {"id":"LINE-FOR-PPA-VAT","kind":"line","source":"Modules/BillingAddMod.vb::computation","input":{"gross":"1000","ppa_rate":"0.20","vat_rate":"0.12","ppa":true,"vat":true,"marker_percent":"0"},"expected":{"ppa":"200","discount":"0","net":"800","tax":"96","scipsi":"896","charge":"1096"}},
+    {"id":"LINE-NO-PPA","kind":"line","source":"Modules/BillingAddMod.vb::computation","input":{"gross":"1000","ppa_rate":"0.10","vat_rate":"0.12","ppa":false,"vat":true,"marker_percent":"0"},"expected":{"ppa":"0","discount":"0","net":"1000","tax":"120","scipsi":"1120","charge":"1120"}},
+    {"id":"LINE-NO-VAT","kind":"line","source":"Modules/BillingAddMod.vb::computation","input":{"gross":"1000","ppa_rate":"0.10","vat_rate":"0.12","ppa":true,"vat":false,"marker_percent":"0"},"expected":{"ppa":"100","discount":"0","net":"900","tax":"0","scipsi":"900","charge":"1000"}},
+    {"id":"LINE-XXXX","kind":"line","source":"Modules/BillingAddMod.vb::computation","input":{"gross":"1000","ppa_rate":"0.10","vat_rate":"0.12","ppa":true,"vat":true,"marker_percent":"10"},"expected":{"ppa":"100","discount":"90","net":"810","tax":"97.20","scipsi":"907.20","charge":"1097.20"}},
+    {"id":"LINE-XXXX-NO-PPA","kind":"line","source":"Modules/BillingAddMod.vb::computation","input":{"gross":"1000","ppa_rate":"0.10","vat_rate":"0.12","ppa":false,"vat":true,"marker_percent":"10"},"expected":{"ppa":"0","discount":"90","net":"910","tax":"109.20","scipsi":"1019.20","charge":"1109.20"}},
+    {"id":"LINE-FRACTION","kind":"line","source":"Modules/BillingAddMod.vb::computation","input":{"gross":"123.45","ppa_rate":"0.10","vat_rate":"0.12","ppa":true,"vat":true,"marker_percent":"0"},"expected":{"ppa":"12.34","discount":"0","net":"111.11","tax":"13.33","scipsi":"124.44","charge":"136.78"}},
+    {"id":"QTY-FUEL","kind":"quantity","source":"Modules/BillingAddMod.vb::qtyvalidate","input":{"quantity":"1.5","rate":"82.35","factor":"1.15","fuel":true},"expected":{"base_gross":"123.525","gross":"142","rate":"94"}},
+    {"id":"QTY-DANGER","kind":"quantity","source":"Modules/BillingAddMod.vb::qtyvalidate","input":{"quantity":"1.5","rate":"82.35","factor":"1.15","fuel":false},"expected":{"base_gross":"123.525","gross":"142.05375","rate":"94.7025"}},
+    {"id":"OR-WITHHOLDING","kind":"full_receipt","source":"Modules/ORBillnoModule.vb::orBillNo","input":{"amount":"1120","vat":"120","withholding_rate":"0.02","withholding":true},"expected":{"withholding":"20","net":"1100"}},
+    {"id":"OR-NO-WITHHOLDING","kind":"full_receipt","source":"Modules/ORBillnoModule.vb::orBillNo","input":{"amount":"1120","vat":"120","withholding_rate":"0.02","withholding":false},"expected":{"withholding":"0","net":"1120"}},
+    {"id":"PARTIAL-CASH","kind":"partial_receipt","source":"OR/frmPartial.vb::txtNet_TextChanged","input":{"amount":"1120","cash":"560","withholding":"0"},"expected":{"balance":"560","vat":"60","indicator":"P"}},
+    {"id":"PARTIAL-FULL-POSITIVE-BALANCE","kind":"partial_receipt","source":"OR/frmPartial.vb::txtNet_TextChanged","input":{"amount":"1120","cash":"1100","withholding":"20"},"expected":{"balance":"20","vat":"120","indicator":"F"},"note":"Captures the observed inconsistency, not approved target behavior."},
+    {"id":"SOA-TOTAL","kind":"statement","source":"Modules/StatementMod.vb::overdue/amountdue","input":{"balance":"1000","finance_charge":"50","payment":"200","current_charge":"300"},"expected":{"overdue":"850","amount_due":"1150"}},
+    {"id":"PERIOD-25","kind":"period","source":"Modules/BillingMod.vb::saveBill","input":{"date":"2026-09-25","number":"0000001234"},"expected":{"period":"2026009","reference":"RB0901234"}},
+    {"id":"PERIOD-26","kind":"period","source":"Modules/BillingMod.vb::saveBill","input":{"date":"2026-09-26","number":"0000001234"},"expected":{"period":"2026010","reference":"RB1001234"}},
+    {"id":"PERIOD-DECEMBER","kind":"period","source":"Modules/BillingMod.vb::saveBill","input":{"date":"2026-12-31","number":"0000001234"},"expected":{"period":"2026012","reference":"RB1201234"}},
+    {"id":"PERIOD-JANUARY","kind":"period","source":"Modules/BillingMod.vb::saveBill","input":{"date":"2027-01-01","number":"0000001234"},"expected":{"period":"2027001","reference":"RB0101234"}}
+  ]
+}

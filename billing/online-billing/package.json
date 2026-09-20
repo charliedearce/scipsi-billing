@@ -1,0 +1,13 @@
+{
+  "name": "scipsi-online-billing-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SCIPSI Online Billing Workspace",
+  "scripts": {
+    "dev": "npm --prefix apps/web run dev",
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:api": "php apps/api/artisan serve",
+    "build": "npm --prefix apps/web run build",
+    "test": "powershell -ExecutionPolicy Bypass -File ./scripts/test-all.ps1"
+  }
+}

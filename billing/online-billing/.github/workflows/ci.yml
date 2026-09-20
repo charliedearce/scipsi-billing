@@ -1,0 +1,88 @@
+name: SCIPSI Online Billing CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  api-tests:
+    name: Backend API Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: online_billing_test
+          POSTGRES_USER: online_billing_dev
+          POSTGRES_PASSWORD: change-me-in-local-env
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 56379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, pgsql, bcmath, redis
+          coverage: none
+
+      - name: Install Composer Dependencies
+        working-directory: billing/online-billing/apps/api
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run Migrations and Tests
+        working-directory: billing/online-billing/apps/api
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 55432
+          DB_DATABASE: online_billing_test
+          DB_USERNAME: online_billing_dev
+          DB_PASSWORD: change-me-in-local-env
+        run: php artisan test
+
+  frontend-build:
+    name: Frontend Typecheck & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install Frontend Dependencies
+        working-directory: billing/online-billing/apps/web
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Build and Type Check
+        working-directory: billing/online-billing/apps/web
+        run: pnpm build

@@ -1,0 +1,1018 @@
+openapi: 3.1.0
+info:
+  title: SCIPSI Online Billing API
+  description: >
+    Authoritative backend API for the SCIPSI Online Billing system.
+    Supports role-based authorization, organization/location tenancy,
+    idempotent requests, structured auditing, and allowlisted typed settings.
+  version: 1.0.0
+servers:
+  - url: http://127.0.0.1:8000/api/v1
+    description: Local development server
+paths:
+  /health:
+    get:
+      summary: Health check probe
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "ok" }
+                  service:
+                    { type: string, example: "scipsi-online-billing-api" }
+                  version: { type: string, example: "v1" }
+
+  /auth/login:
+    post:
+      summary: Authenticate user and issue API bearer token
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  { type: string, format: email, example: "admin@scipsi.test" }
+                password:
+                  {
+                    type: string,
+                    format: password,
+                    example: "AdminPassword123!",
+                  }
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user: { $ref: "#/components/schemas/User" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /auth/me:
+    get:
+      summary: Get current authenticated user profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      summary: Revoke current session token
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+
+  /auth/revoke-sessions:
+    post:
+      summary: Revoke active sessions for self or specified user
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id: { type: integer, nullable: true }
+      responses:
+        "200":
+          description: Sessions revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+
+  /users:
+    get:
+      summary: List users in organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            { type: string, enum: [active, suspended, pending_activation] }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25 }
+      responses:
+        "200":
+          description: Paginated users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedUsers"
+    post:
+      summary: Create new user
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
+  /users/{id}:
+    get:
+      summary: Get user details
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    put:
+      summary: Update user profile or roles
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "409":
+          $ref: "#/components/responses/ConcurrencyConflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
+  /users/{id}/suspend:
+    post:
+      summary: Suspend user and revoke active sessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lock_version: { type: integer }
+      responses:
+        "200":
+          description: User suspended
+        "409":
+          $ref: "#/components/responses/ConcurrencyConflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
+  /users/{id}/activate:
+    post:
+      summary: Activate suspended user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lock_version: { type: integer }
+      responses:
+        "200":
+          description: User activated
+        "409":
+          $ref: "#/components/responses/ConcurrencyConflict"
+
+  /roles:
+    get:
+      summary: List system and organization roles
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of roles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Role" }
+
+  /permissions:
+    get:
+      summary: List all available permissions grouped by category
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Grouped permissions
+
+  /settings:
+    get:
+      summary: List allowlisted application settings
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: location_id
+          in: query
+          schema: { type: integer, nullable: true }
+      responses:
+        "200":
+          description: List of settings with current effective values
+    put:
+      summary: Update allowlisted setting
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: { type: string }
+                location_id: { type: integer, nullable: true }
+                lock_version: { type: integer, nullable: true }
+      responses:
+        "200":
+          description: Setting updated
+        "403":
+          description: Forbidden deployment secret
+        "409":
+          $ref: "#/components/responses/ConcurrencyConflict"
+
+  /audit-logs:
+    get:
+      summary: Query structured audit logs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: user_id
+          in: query
+          schema: { type: integer }
+        - name: auditable_type
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paginated audit logs
+
+  /reports/billing-collections:
+    get:
+      summary: Read a scoped operational billing and collections register
+      description: >
+        Returns issued-invoice and collection-receipt activity as separate streams. It is not a
+        customer balance, aging result, fiscal/BIR export, or reconciliation assertion.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: date_to
+          in: query
+          schema: { type: string, format: date }
+        - name: location_id
+          in: query
+          schema: { type: integer }
+        - name: customer_id
+          in: query
+          schema: { type: integer }
+        - name: invoice_statuses[]
+          in: query
+          schema:
+            { type: array, items: { type: string, enum: [POSTED, CANCELLED] } }
+        - name: receipt_statuses[]
+          in: query
+          schema:
+            {
+              type: array,
+              items: { type: string, enum: [POSTED, REVERSED, VOID] },
+            }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: Scoped operational register with per-currency totals and paginated rows
+        "403":
+          description: The caller cannot access the requested location
+        "422":
+          description: Invalid filter or report row limit exceeded
+
+  /reports/billing-collections/export:
+    get:
+      summary: Export the scoped operational billing and collections register as CSV
+      description: >
+        Uses the same scope and row limit as the register and creates an append-only export audit
+        event. The CSV is spreadsheet-formula safe and is not a fiscal/BIR export.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: date_to
+          in: query
+          schema: { type: string, format: date }
+        - name: location_id
+          in: query
+          schema: { type: integer }
+        - name: customer_id
+          in: query
+          schema: { type: integer }
+        - name: invoice_statuses[]
+          in: query
+          schema:
+            { type: array, items: { type: string, enum: [POSTED, CANCELLED] } }
+        - name: receipt_statuses[]
+          in: query
+          schema:
+            {
+              type: array,
+              items: { type: string, enum: [POSTED, REVERSED, VOID] },
+            }
+      responses:
+        "200":
+          description: Audited UTF-8 CSV export
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+        "403":
+          description: The caller cannot access the requested location
+        "422":
+          description: Invalid filter or report row limit exceeded
+
+  /reports/vip-credit-aging/export:
+    get:
+      summary: Export organization-scoped VIP principal aging as CSV
+      description: >
+        Administrator-only export of P3-09 credit-charge principal aging at an Asia/Manila cutoff.
+        It is spreadsheet-formula safe and audited. Late charges, fiscal books, collection receipts,
+        and PPA release are deliberately excluded.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: as_of
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Audited UTF-8 CSV of VIP principal aging
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+        "403":
+          description: Caller lacks export permission or organization-wide Administrator authority
+        "422":
+          description: Invalid as-of date
+
+  /reports/communications-operations:
+    get:
+      summary: Read scoped communications operations aggregates
+      description: >
+        Read-only counts for transactional-SMS delivery status/event keys and, for an
+        organization Administrator, announcement lifecycle and interaction aggregates. No
+        recipient, SMS content, provider identifiers, financial data, or export is returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: date_to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Manila-time, scope-filtered operational aggregates
+        "403":
+          description: Caller lacks transactional-SMS delivery access
+        "422":
+          description: Invalid date range or range exceeds 93 calendar days
+
+  /admin/document-studio/templates/{templateId}/versions/{versionId}/retire:
+    post:
+      summary: Retire an unrouted Document Studio layout version
+      description: >
+        Retains the immutable layout, issued-document artifacts, and audit history. The version
+        cannot be retired while it remains active for a current or future issuance route; activate
+        a replacement version first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Version retired and immutable audit event recorded
+        "403":
+          description: Missing Document Studio retirement permission
+        "404":
+          description: No template/version exists inside the caller organization
+        "422":
+          description: Retirement reason is invalid or the version remains routed for issuance
+
+  /admin/document-studio/assets:
+    get:
+      summary: List organization-scoped private Document Studio branding assets
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Metadata only; private storage paths and image bytes are not returned
+        "403":
+          description: Missing Document Studio view permission
+    post:
+      summary: Upload a private PNG or JPEG branding asset
+      description: >
+        Accepts only structurally valid PNG or JPEG files up to 2 MB and 4096 pixels per side.
+        Remote URLs, SVG and arbitrary sources are intentionally not supported.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [asset_type, name, file]
+              properties:
+                asset_type: { type: string, enum: [LOGO, WATERMARK, SIGNATURE] }
+                name: { type: string, maxLength: 128 }
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Private branding asset stored and audited
+        "403":
+          description: Missing branding-asset management permission
+        "422":
+          description: Invalid image, size, dimensions or request metadata
+
+  /admin/document-studio/assets/{assetId}/download:
+    get:
+      summary: Download an authorized private Document Studio branding asset
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Private no-store PNG or JPEG stream
+        "403":
+          description: Missing Document Studio view permission
+        "404":
+          description: Asset is outside caller organization or private payload is unavailable
+
+  /admin/document-studio/assets/{assetId}/retire:
+    post:
+      summary: Retire a branding asset without deleting historical rendering source
+      description: >
+        Retired assets cannot be used by newly created or edited drafts, but remain private and
+        renderable for existing published layouts, snapshots, and artifact retries.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Asset retired and append-only audit event recorded
+        "403":
+          description: Missing branding-asset management permission
+        "404":
+          description: Asset is outside caller organization
+        "422":
+          description: Retirement reason is invalid
+
+  /account-statements:
+    get:
+      summary: List immutable non-fiscal account-statement snapshots
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: customer_id
+          in: query
+          schema: { type: integer }
+        - name: as_of_date
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Paginated account-statement snapshots
+    post:
+      summary: Generate an immutable non-fiscal account-statement snapshot and canonical PDF
+      description: >
+        Captures the customer's posted invoices and effective receipt allocations as of the supplied
+        date. It never posts payment, settles an invoice, or issues a fiscal document.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, as_of_date]
+              properties:
+                customer_id: { type: integer }
+                as_of_date: { type: string, format: date }
+                location_id: { type: integer, nullable: true }
+      responses:
+        "201":
+          description: Snapshot and frozen canonical-PDF artifact created
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
+  /account-statements/{id}:
+    get:
+      summary: Read an immutable account statement with frozen lines
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Account-statement snapshot detail
+        "404":
+          description: No scoped statement exists for this identifier
+
+  /account-statements/{id}/artifact/download:
+    get:
+      summary: Download the canonical PDF rendered from the frozen account-statement payload
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Canonical non-fiscal PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "404":
+          description: No valid canonical artifact is available
+
+  /account-statements/{id}/artifact/retry:
+    post:
+      summary: Re-render a failed account-statement artifact from its frozen payload
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Artifact re-rendered without reading live billing data
+        "404":
+          description: No failed canonical artifact is available
+
+  /transmittals:
+    get:
+      summary: List immutable yellow-invoice and white-receipt transmittal snapshots
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: kind
+          in: query
+          schema: { type: string, enum: [YELLOW_INVOICE, WHITE_RECEIPT] }
+        - name: as_of_date
+          in: query
+          schema: { type: string, format: date }
+        - name: location_id
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Paginated scoped transmittal snapshots
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedTransmittals" }
+    post:
+      summary: Generate an immutable, explicit source-membership transmittal snapshot
+      description: >
+        Source documents must be POSTED, belong to the caller organization/location, and have a
+        business date on or before as_of_date. This operation does not issue a fiscal document,
+        settle a source, or infer BIR 2307/income classifications.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTransmittalRequest"
+      responses:
+        "201":
+          description: Immutable snapshot generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Transmittal" }
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
+  /transmittals/eligible-sources:
+    get:
+      summary: List posted source documents eligible for a selected transmittal type and as-of date
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema: { type: string, enum: [YELLOW_INVOICE, WHITE_RECEIPT] }
+        - name: as_of_date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: location_id
+          in: query
+          schema: { type: integer }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Paginated eligible source summaries
+          content:
+            application/json:
+              schema:
+                { $ref: "#/components/schemas/PaginatedTransmittalSources" }
+
+  /transmittals/{id}:
+    get:
+      summary: Read one immutable transmittal with its frozen source items
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Transmittal snapshot detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Transmittal" }
+        "404":
+          description: No scoped transmittal exists for this identifier
+
+  /transmittals/{id}/artifact/download:
+    get:
+      summary: Download the canonical PDF rendered from the frozen transmittal payload
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Canonical non-fiscal PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "404":
+          description: No valid canonical artifact is available
+
+  /transmittals/{id}/artifact/retry:
+    post:
+      summary: Re-render a failed transmittal artifact from its frozen payload
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Artifact re-rendered without reading live invoice or receipt data
+        "404":
+          description: No failed canonical artifact is available
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      schema: { type: string }
+      description: Unique client key ensuring exactly-once command execution
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        status: { type: string, enum: [active, suspended, pending_activation] }
+        phone: { type: string, nullable: true }
+        lock_version: { type: integer }
+        organization_id: { type: integer }
+        roles:
+          type: array
+          items: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+
+    UserProfile:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          properties:
+            organization: { type: object }
+            locations: { type: array, items: { type: object } }
+
+    Role:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        label: { type: string }
+        is_system: { type: boolean }
+        permissions:
+          type: array
+          items: { type: object }
+
+    CreateUserRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        phone: { type: string, nullable: true }
+        status: { type: string, enum: [active, suspended, pending_activation] }
+        role_ids: { type: array, items: { type: integer } }
+        location_ids: { type: array, items: { type: integer } }
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        password: { type: string, format: password, nullable: true }
+        phone: { type: string, nullable: true }
+        status: { type: string, enum: [active, suspended, pending_activation] }
+        role_ids: { type: array, items: { type: integer } }
+        location_ids: { type: array, items: { type: integer } }
+        lock_version:
+          {
+            type: integer,
+            description: "Expected current version for optimistic concurrency",
+          }
+
+    PaginatedUsers:
+      type: object
+      properties:
+        current_page: { type: integer }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/User" }
+        total: { type: integer }
+
+    CreateTransmittalRequest:
+      type: object
+      required: [kind, as_of_date]
+      properties:
+        kind: { type: string, enum: [YELLOW_INVOICE, WHITE_RECEIPT] }
+        as_of_date: { type: string, format: date }
+        location_id: { type: integer, nullable: true }
+        invoice_ids:
+          type: array
+          minItems: 1
+          items: { type: integer }
+          description: Required only for YELLOW_INVOICE; source IDs must be distinct.
+        receipt_ids:
+          type: array
+          minItems: 1
+          items: { type: integer }
+          description: Required only for WHITE_RECEIPT; source IDs must be distinct.
+
+    TransmittalSource:
+      type: object
+      properties:
+        id: { type: integer }
+        source_number: { type: string }
+        business_date: { type: string, format: date }
+        currency: { type: string, example: PHP }
+        party_name: { type: string, nullable: true }
+        amount: { type: string, example: "1250.00" }
+
+    Transmittal:
+      type: object
+      properties:
+        id: { type: integer }
+        transmittal_number: { type: string, example: YTR-01K5... }
+        kind: { type: string, enum: [YELLOW_INVOICE, WHITE_RECEIPT] }
+        as_of_date: { type: string, format: date }
+        currency: { type: string, example: PHP }
+        source_item_count: { type: integer }
+        summary: { type: object, additionalProperties: true }
+        status: { type: string, enum: [GENERATED, VOID] }
+        generated_at: { type: string, format: date-time }
+        yellow_items:
+          type: array
+          items: { type: object }
+        white_items:
+          type: array
+          items: { type: object }
+
+    PaginatedTransmittals:
+      type: object
+      properties:
+        current_page: { type: integer }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Transmittal" }
+        total: { type: integer }
+
+    PaginatedTransmittalSources:
+      type: object
+      properties:
+        current_page: { type: integer }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/TransmittalSource" }
+        total: { type: integer }
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Forbidden:
+      description: Action denied by permissions or security policy
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    ConcurrencyConflict:
+      description: Optimistic concurrency lock conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Unprocessable:
+      description: Validation or business rule violation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
