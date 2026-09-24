@@ -6,7 +6,7 @@
     <div class="relative flex-1">
       <AuthTopBar />
 
-      <div class="auth-right-wrap">
+      <div class="auth-right-wrap" :class="{ 'has-dev-accounts': showDevAccounts }">
         <div class="form">
           <h3 class="title">{{ $t('login.title') }}</h3>
           <p class="sub-title">{{ $t('login.subTitle') }}</p>
@@ -17,6 +17,35 @@
             @keyup.enter="handleSubmit"
             style="margin-top: 25px"
           >
+            <div v-if="showDevAccounts" class="mb-4">
+              <div class="mb-2 flex items-center gap-2">
+                <span class="text-sm text-g-700">{{ $t('login.devAccount.label') }}</span>
+                <ElTag size="small" effect="plain" type="warning">{{
+                  $t('login.devAccount.badge')
+                }}</ElTag>
+              </div>
+              <ElSelect
+                v-model="selectedDevAccount"
+                class="w-full custom-height"
+                popper-class="dev-login-account-dropdown"
+                :placeholder="$t('login.devAccount.placeholder')"
+                clearable
+                @change="applyDevAccount"
+              >
+                <ElOptionGroup
+                  v-for="group in devAccountGroups"
+                  :key="group.role"
+                  :label="group.role"
+                >
+                  <ElOption
+                    v-for="account in group.accounts"
+                    :key="account.email"
+                    :label="account.name"
+                    :value="account.email"
+                  />
+                </ElOptionGroup>
+              </ElSelect>
+            </div>
             <ElFormItem prop="username">
               <ElInput
                 class="custom-height"
@@ -102,6 +131,7 @@
   import { fetchLogin } from '@/api/auth'
   import { ElNotification, type FormInstance, type FormRules } from 'element-plus'
   import { useSettingStore } from '@/store/modules/setting'
+  import { devLoginAccounts, type DevLoginAccount } from './dev-accounts'
 
   defineOptions({ name: 'Login' })
 
@@ -124,6 +154,38 @@
     password: '',
     rememberPassword: true
   })
+
+  const showDevAccounts = import.meta.env.DEV && devLoginAccounts.length > 0
+  const selectedDevAccount = ref('')
+
+  const devAccountGroups = computed(() => {
+    const groups = new Map<string, DevLoginAccount[]>()
+    for (const account of devLoginAccounts) {
+      const list = groups.get(account.role) ?? []
+      list.push(account)
+      groups.set(account.role, list)
+    }
+    return [...groups.entries()].map(([role, accounts]) => ({ role, accounts }))
+  })
+
+  const applyDevAccount = (email?: string) => {
+    const account = devLoginAccounts.find((item) => item.email === email)
+    if (!account) {
+      formData.username = ''
+      formData.password = ''
+      isPassing.value = false
+      isClickPass.value = false
+      dragVerify.value?.reset?.()
+      return
+    }
+
+    formData.username = account.email
+    formData.password = account.password
+    isClickPass.value = false
+    nextTick(() => {
+      dragVerify.value?.pass?.()
+    })
+  }
 
   const rules = computed<FormRules>(() => ({
     username: [{ required: true, message: t('login.placeholder.username'), trigger: 'blur' }],
@@ -208,4 +270,10 @@
 
 <style scoped>
   @import './style.css';
+</style>
+
+<style>
+  .dev-login-account-dropdown .el-select-dropdown__wrap {
+    max-height: 420px;
+  }
 </style>

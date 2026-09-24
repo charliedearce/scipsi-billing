@@ -134,6 +134,11 @@
     },
     "title": "欢迎回来",
     "subTitle": "输入您的账号和密码登录",
+    "devAccount": {
+      "label": "以此身份登录",
+      "badge": "开发环境",
+      "placeholder": "选择角色账号"
+    },
     "roles": {
       "super": "超级管理员",
       "admin": "管理员",

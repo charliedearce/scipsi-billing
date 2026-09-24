@@ -134,8 +134,13 @@
     },
     "title": "Welcome back",
     "subTitle": "Sign in to access your billing portal account",
+    "devAccount": {
+      "label": "Sign in as",
+      "badge": "Development",
+      "placeholder": "Choose a role account"
+    },
     "placeholder": {
-        "username": "Please enter your email",
+      "username": "Please enter your email",
       "password": "Please enter your password",
       "slider": "Please slide to verify"
     },

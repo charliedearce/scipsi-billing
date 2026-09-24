@@ -308,6 +308,16 @@
     emit('passCallback')
   }
 
+  const pass = () => {
+    const numericWidth = getNumericWidth()
+    if (handler.value && progressBar.value && numericWidth > props.height) {
+      handler.value.style.transition = 'none'
+      handler.value.style.left = numericWidth - props.height + 'px'
+      progressBar.value.style.width = numericWidth - props.height / 2 + 'px'
+    }
+    passVerify()
+  }
+
   /**
    * 重置验证状态函数
    */
@@ -329,7 +339,8 @@
 
   // 暴露重置方法给父组件
   defineExpose({
-    reset
+    reset,
+    pass
   })
 </script>
 

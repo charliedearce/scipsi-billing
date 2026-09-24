@@ -22,6 +22,10 @@
   .custom-height {
     @apply !h-[40px];
   }
+
+  &.has-dev-accounts {
+    @apply h-[760px] overflow-y-auto;
+  }
 }
 
 /* 滑入动画 */
