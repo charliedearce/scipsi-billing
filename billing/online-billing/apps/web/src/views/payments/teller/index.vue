@@ -316,9 +316,42 @@
                   >Invoice Payment Allocation</h3
                 >
                 <p class="text-xs text-slate-400"
-                  >Specify actual cleared cash amount and optional withholding tax certificate.</p
+                  >Confirm the cash that arrived. Withholding fills only what that cash does not
+                  cover.</p
                 >
               </div>
+            </div>
+
+            <div class="mb-3 rounded-lg border border-g-200 bg-g-100/40 p-3">
+              <div class="mb-1 text-xs text-g-500">Approved BIR 2307</div>
+              <ElSelect
+                v-model="selectedCertificateId"
+                class="w-full"
+                clearable
+                placeholder="Cash only"
+                :disabled="!isAssignedToMe || current.status !== 'IN_REVIEW'"
+                @change="onCertificatePicked"
+                @clear="onCertificatePicked"
+              >
+                <ElOption
+                  v-if="applicableCertificates.length"
+                  label="Use approved certificates"
+                  value="auto"
+                />
+                <ElOption
+                  v-for="certificate in applicableCertificates"
+                  :key="certificate.id"
+                  :label="certificateLabel(certificate)"
+                  :value="certificate.id"
+                />
+              </ElSelect>
+              <p class="mt-2 text-xs text-g-500">
+                {{
+                  applicableCertificates.length
+                    ? 'The unused amount is shared across these bills, and only for dates inside the certificate period. The invoice total does not change.'
+                    : 'This customer has no approved BIR 2307 with an unused amount. Confirm the cash that arrived.'
+                }}
+              </p>
             </div>
 
             <ElTable
@@ -348,26 +381,16 @@
                     size="small"
                     :disabled="!isAssignedToMe || current.status !== 'IN_REVIEW'"
                     placeholder="0.00"
+                    @change="onCashEdited(row)"
                   />
                 </template>
               </ElTableColumn>
-              <ElTableColumn label="Withholding Cert ID / Amount" min-width="190">
+              <ElTableColumn label="Withholding" min-width="140" align="right">
                 <template #default="{ row }">
-                  <div class="flex items-center gap-1.5">
-                    <ElInput
-                      v-model="row.certificate_id"
-                      size="small"
-                      placeholder="Cert ID"
-                      :disabled="!isAssignedToMe || current.status !== 'IN_REVIEW'"
-                      class="!w-24"
-                    />
-                    <ElInput
-                      v-model="row.withholding_amount"
-                      size="small"
-                      placeholder="Amount"
-                      :disabled="!isAssignedToMe || current.status !== 'IN_REVIEW'"
-                    />
-                  </div>
+                  <span class="font-mono text-sm">{{ row.withholding_amount || '0.00' }}</span>
+                  <span v-if="row.certificate_id" class="mt-0.5 block text-[11px] text-g-500">{{
+                    certificateNumber(row.certificate_id)
+                  }}</span>
                 </template>
               </ElTableColumn>
             </ElTable>
@@ -564,6 +587,8 @@
     type ManualPaymentSubmission
   } from '@/api/payments'
   import { downloadPrivateFile } from '@/api/documentRequirements'
+  import { fetchAdminWithholding, type WithholdingCertificate } from '@/api/taxEvidence'
+  import { planWithholding, usableWithholdingCertificates } from '@/utils/billing/withholdingPlan'
   import { useUserStore } from '@/store/modules/user'
 
   defineOptions({ name: 'TellerPaymentProofReview' })
@@ -571,6 +596,7 @@
   type DecisionRow = {
     invoice_id: number
     invoice_number: string
+    business_date: string
     requested_amount: string
     cash_amount: string
     certificate_id: string
@@ -585,6 +611,9 @@
   const queue = ref<ManualPaymentSubmission[]>([])
   const current = ref<any>(null)
   const decisionRows = ref<DecisionRow[]>([])
+  const approvedCertificates = ref<WithholdingCertificate[]>([])
+  const selectedCertificateId = ref<number | 'auto' | null>(null)
+  const cashEdits = ref<Record<number, string>>({})
   const confirmedReference = ref('')
   const queueFilter = ref<'all' | 'mine'>('all')
 
@@ -630,6 +659,60 @@
     return queue.value
   })
 
+  const applicableCertificates = computed(() =>
+    usableWithholdingCertificates(approvedCertificates.value)
+  )
+
+  function certificateLabel(certificate: WithholdingCertificate) {
+    const remaining = certificate.remaining_amount || certificate.certified_amount
+    return `${certificate.certificate_no} · ${remaining} unused`
+  }
+
+  function certificateNumber(certificateId: string) {
+    return (
+      approvedCertificates.value.find((certificate) => certificate.id === Number(certificateId))
+        ?.certificate_no || `Certificate ${certificateId}`
+    )
+  }
+
+  function applyWithholdingPlan(preserveCash: boolean) {
+    const certificateId =
+      selectedCertificateId.value === 'auto' ? undefined : selectedCertificateId.value
+    const plan = planWithholding(
+      decisionRows.value.map((row) => ({
+        invoiceId: row.invoice_id,
+        businessDate: row.business_date,
+        outstanding: row.requested_amount
+      })),
+      applicableCertificates.value,
+      {
+        ...(certificateId !== undefined ? { certificateId } : {}),
+        cashByInvoice: preserveCash ? cashEdits.value : undefined
+      }
+    )
+    const byInvoice = new Map(plan.map((line) => [line.invoiceId, line]))
+    decisionRows.value = decisionRows.value.map((row) => {
+      const line = byInvoice.get(row.invoice_id)
+      if (!line) return row
+      return {
+        ...row,
+        cash_amount: line.cashAmount,
+        withholding_amount: line.withholdingAmount,
+        certificate_id: line.certificateId ? String(line.certificateId) : ''
+      }
+    })
+  }
+
+  function onCertificatePicked() {
+    cashEdits.value = {}
+    applyWithholdingPlan(false)
+  }
+
+  function onCashEdited(row: DecisionRow) {
+    cashEdits.value = { ...cashEdits.value, [row.invoice_id]: row.cash_amount || '0.00' }
+    applyWithholdingPlan(true)
+  }
+
   const totalAllocatedAmount = computed(() => {
     return decisionRows.value.reduce((total, row) => {
       const cash = parseFloat(row.cash_amount) || 0
@@ -660,11 +743,24 @@
       decisionRows.value = current.value.items.map((item: any) => ({
         invoice_id: item.invoice_id,
         invoice_number: item.invoice?.invoice_number || `Bill #${item.invoice_id}`,
+        business_date: item.invoice?.business_date || '',
         requested_amount: item.requested_amount,
         cash_amount: item.requested_amount,
         certificate_id: '',
-        withholding_amount: ''
+        withholding_amount: '0.00'
       }))
+      cashEdits.value = {}
+      approvedCertificates.value = []
+      selectedCertificateId.value = null
+      if (current.value.customer_id) {
+        const page = await fetchAdminWithholding({
+          customer_id: Number(current.value.customer_id),
+          status: 'APPROVED'
+        })
+        approvedCertificates.value = page.data || []
+      }
+      selectedCertificateId.value = applicableCertificates.value.length ? 'auto' : null
+      applyWithholdingPlan(false)
     } catch (error: any) {
       ElMessage.error(error?.message || 'Unable to load payment proof detail.')
     } finally {

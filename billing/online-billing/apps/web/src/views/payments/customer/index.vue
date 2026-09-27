@@ -227,12 +227,19 @@
           </div>
           <div>
             <div class="text-xs text-slate-400 uppercase tracking-wider font-medium"
-              >Selected Bills Amount</div
+              >Selected bills</div
             >
             <div class="flex items-baseline gap-2">
-              <MoneyDisplay :value="selectedTotal" size="xl" class="text-white" />
-              <span class="text-xs text-slate-400">Total payable</span>
+              <MoneyDisplay :value="selectedBillTotal" size="xl" class="text-white" />
+              <span class="text-xs text-slate-400">Invoice total</span>
             </div>
+            <p v-if="selectedWithholdingCents > 0" class="mt-1 text-xs text-slate-300">
+              Approved 2307 {{ formatAmount(selectedWithholding) }} · Cash to deposit
+              {{ formatAmount(selectedCashDue) }}
+            </p>
+            <p v-else class="mt-1 text-xs text-slate-400">
+              No approved BIR 2307 applies to these bill dates. Deposit the invoice total.
+            </p>
           </div>
         </div>
 
@@ -290,11 +297,19 @@
           }}</p>
           <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
             <span
-              >Selected total:
+              >Bill total:
               <strong>{{
                 formatAmount(activeInstruction.gross_selected_amount, activeInstruction.currency)
               }}</strong></span
             >
+            <span v-if="instructionWithholdingCents > 0">
+              Approved 2307:
+              <strong>{{
+                formatAmount(instructionWithholding, activeInstruction.currency)
+              }}</strong>
+              · Cash to deposit:
+              <strong>{{ formatAmount(instructionCashDue, activeInstruction.currency) }}</strong>
+            </span>
             <span>Issued: {{ activeInstruction.instruction_issued_at }}</span>
             <span
               >Deadline: <strong>{{ activeInstruction.payment_deadline_at }}</strong></span
@@ -307,8 +322,11 @@
             >
           </div>
           <p class="mt-2 text-xs text-slate-500"
-            >The deadline is fixed when the instruction is issued. A late proof remains available
-            for reconciliation but is marked for teller review; it never erases the bill debt.</p
+            >Deposit the cash amount. The invoice total stays on the bill. When an approved BIR
+            2307 covers these dates, the teller applies the unused certificate after confirming the
+            cash. The deadline is fixed when the instruction is issued. A late proof remains
+            available for reconciliation but is marked for teller review; it never erases the bill
+            debt.</p
           >
         </div>
         <ElButton
@@ -618,6 +636,13 @@
     type PaymentGroup,
     type PortalBill
   } from '@/api/payments'
+  import { fetchCustomerWithholding, type WithholdingCertificate } from '@/api/taxEvidence'
+  import {
+    fromCents,
+    planWithholding,
+    toCents,
+    usableWithholdingCertificates
+  } from '@/utils/billing/withholdingPlan'
 
   defineOptions({ name: 'CustomerPaymentPortal' })
 
@@ -631,6 +656,7 @@
   const submissions = ref<ManualPaymentSubmission[]>([])
   const paymentGroups = ref<PaymentGroup[]>([])
   const selectedBills = ref<PortalBill[]>([])
+  const approvedCertificates = ref<WithholdingCertificate[]>([])
   const searchQuery = ref('')
   const declaredReference = ref('')
   const proofFile = ref<File | null>(null)
@@ -659,6 +685,67 @@
 
   const selectedTotal = computed(() =>
     selectedBills.value.reduce((total, bill) => total + Number(bill.outstanding_amount || 0), 0)
+  )
+
+  const usableCertificates = computed(() =>
+    usableWithholdingCertificates(approvedCertificates.value)
+  )
+
+  const selectedPlan = computed(() =>
+    planWithholding(
+      selectedBills.value.map((bill) => ({
+        invoiceId: bill.id,
+        businessDate: bill.business_date,
+        outstanding: bill.outstanding_amount
+      })),
+      usableCertificates.value
+    )
+  )
+
+  const selectedBillTotal = computed(() =>
+    fromCents(
+      selectedBills.value.reduce((total, bill) => total + toCents(bill.outstanding_amount), 0)
+    )
+  )
+
+  const selectedWithholding = computed(() =>
+    fromCents(
+      selectedPlan.value.reduce((total, line) => total + toCents(line.withholdingAmount), 0)
+    )
+  )
+
+  const selectedWithholdingCents = computed(() => toCents(selectedWithholding.value))
+
+  const selectedCashDue = computed(() =>
+    fromCents(selectedPlan.value.reduce((total, line) => total + toCents(line.cashAmount), 0))
+  )
+
+  const instructionPlan = computed(() => {
+    const group = activeInstruction.value
+    if (!group) return []
+    return planWithholding(
+      (group.items || []).map((item) => ({
+        invoiceId: item.invoice_id,
+        businessDate:
+          item.invoice?.business_date ||
+          bills.value.find((bill) => bill.id === item.invoice_id)?.business_date ||
+          '',
+        outstanding: item.requested_amount
+      })),
+      usableCertificates.value
+    )
+  })
+
+  const instructionWithholding = computed(() =>
+    fromCents(
+      instructionPlan.value.reduce((total, line) => total + toCents(line.withholdingAmount), 0)
+    )
+  )
+
+  const instructionWithholdingCents = computed(() => toCents(instructionWithholding.value))
+
+  const instructionCashDue = computed(() =>
+    fromCents(instructionPlan.value.reduce((total, line) => total + toCents(line.cashAmount), 0))
   )
 
   const activeInstruction = computed(
@@ -710,16 +797,18 @@
       accountTin.value = link?.customer?.tin || ''
       if (!activeCustomerId.value) return
 
-      const [billList, history, groups, documentTypes] = await Promise.all([
+      const [billList, history, groups, documentTypes, withholdingPage] = await Promise.all([
         fetchPortalBills(activeCustomerId.value),
         fetchPaymentSubmissions(activeCustomerId.value),
         fetchPortalPaymentGroups(activeCustomerId.value),
-        fetchDocumentTypes({ purpose: 'PAYMENT_PROOF', is_active: true })
+        fetchDocumentTypes({ purpose: 'PAYMENT_PROOF', is_active: true }),
+        fetchCustomerWithholding()
       ])
       bills.value = billList
       submissions.value = history.data || []
       paymentGroups.value = groups
       paymentProofType.value = documentTypes[0] || null
+      approvedCertificates.value = withholdingPage.data || []
     } catch (error: any) {
       ElMessage.error(error?.message || 'Unable to load payment information.')
     } finally {

@@ -265,6 +265,36 @@ class TaxEvidenceVerificationTest extends TestCase
         ]);
     }
 
+    public function test_customer_can_submit_a_2307_without_inventing_a_rate(): void
+    {
+        $file = $this->createPrivateFileForUser($this->customerUser1, '2307_amount_only.pdf');
+
+        $response = $this->actingAs($this->customerUser1, 'sanctum')
+            ->postJson('/api/v1/customer/tax-evidence/withholding', [
+                'customer_id' => $this->customer1->id,
+                'certificate_no' => '2307-2026-AMOUNT-ONLY',
+                'private_file_id' => $file->id,
+                'payor_tin' => '111-222-333-000',
+                'payor_name' => 'OCEAN EXPORTERS INC',
+                'period_from' => Carbon::now()->subMonth()->toDateString(),
+                'period_to' => Carbon::now()->toDateString(),
+                'atc_code' => 'WC158',
+                'income_payment_base' => '10000.00',
+                'certified_amount' => '200.00',
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('certificate.certified_amount', '200.00')
+            ->assertJsonPath('certificate.withholding_rate', null);
+
+        $this->assertDatabaseHas('customer_withholding_certificates', [
+            'certificate_no' => '2307-2026-AMOUNT-ONLY',
+            'certified_amount' => '200.00',
+            'remaining_amount' => '200.00',
+            'withholding_rate' => null,
+        ]);
+    }
+
     public function test_duplicate_withholding_certificate_number_is_rejected(): void
     {
         $file1 = $this->createPrivateFileForUser($this->customerUser1, '2307_form_1.pdf');

@@ -51,9 +51,18 @@ class TaxEvidenceService
             ]);
         }
 
-        // Validate amounts
+        // Validate amounts. The certified amount is the figure on the BIR 2307.
+        // A rate is stored only when the customer or reviewer supplied one.
         $base = number_format((float) $data['income_payment_base'], 2, '.', '');
-        $rate = number_format((float) ($data['withholding_rate'] ?? '0.0100'), 4, '.', '');
+        $rate = null;
+        if (isset($data['withholding_rate']) && $data['withholding_rate'] !== '') {
+            $rate = number_format((float) $data['withholding_rate'], 4, '.', '');
+            if (bccomp($rate, '0', 4) !== 1) {
+                throw ValidationException::withMessages([
+                    'withholding_rate' => 'Withholding rate must be greater than zero when provided.',
+                ]);
+            }
+        }
         $certifiedAmount = number_format((float) $data['certified_amount'], 2, '.', '');
 
         if (bccomp($certifiedAmount, '0.00', 2) <= 0) {
