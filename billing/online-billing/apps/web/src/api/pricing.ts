@@ -27,6 +27,9 @@ export interface Tariff {
   service_type: 'ARRASTRE' | 'STEVEDORING' | 'OTHER'
   route_type: 'DOMESTIC' | 'FOREIGN'
   unit_of_measure: string
+  legacy_t_scode?: string | null
+  legacy_t_sname?: string | null
+  cargo_class?: string | null
   is_active: boolean
   versions: TariffVersion[]
 }

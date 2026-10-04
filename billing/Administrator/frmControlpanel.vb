@@ -2,6 +2,7 @@
 Public Class frmControlpanel
     Private orPrintDesignerItem As DevExpress.XtraBars.BarButtonItem
     Private servicePrintDesignerItem As DevExpress.XtraBars.BarButtonItem
+    Private nsclServicePrintDesignerItem As DevExpress.XtraBars.BarButtonItem
 
     Protected Overrides ReadOnly Property CreateParams() As CreateParams
         Get
@@ -82,6 +83,12 @@ Public Class frmControlpanel
             BarSubItem15.AddItem(servicePrintDesignerItem)
             AddHandler servicePrintDesignerItem.ItemClick, AddressOf servicePrintDesignerItem_ItemClick
         End If
+
+        If nsclServicePrintDesignerItem Is Nothing Then
+            nsclServicePrintDesignerItem = New DevExpress.XtraBars.BarButtonItem(barManager1, "NSCL Service Print Designer")
+            BarSubItem15.AddItem(nsclServicePrintDesignerItem)
+            AddHandler nsclServicePrintDesignerItem.ItemClick, AddressOf nsclServicePrintDesignerItem_ItemClick
+        End If
     End Sub
 
     Private Sub orPrintDesignerItem_ItemClick(ByVal sender As Object, ByVal e As DevExpress.XtraBars.ItemClickEventArgs)
@@ -90,6 +97,10 @@ Public Class frmControlpanel
 
     Private Sub servicePrintDesignerItem_ItemClick(ByVal sender As Object, ByVal e As DevExpress.XtraBars.ItemClickEventArgs)
         ServicePrintTemplateService.DesignTemplate(Me)
+    End Sub
+
+    Private Sub nsclServicePrintDesignerItem_ItemClick(ByVal sender As Object, ByVal e As DevExpress.XtraBars.ItemClickEventArgs)
+        ServicePrintTemplateService.DesignNsclTemplate(Me)
     End Sub
 
     Private Sub BarButtonItem15_ItemClick(sender As Object, e As DevExpress.XtraBars.ItemClickEventArgs) Handles BarButtonItem15.ItemClick

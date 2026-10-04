@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\Billing\BillingQueueEstimateService;
 use App\Services\Otp\Contracts\OtpGatewayInterface;
 use App\Services\Otp\Gateways\FakeOtpGateway;
 use App\Services\Otp\Gateways\SkySmsOtpGateway;
@@ -17,6 +18,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->scoped(BillingQueueEstimateService::class);
+
         $this->app->singleton(FakeSmsGateway::class, function () {
             return new FakeSmsGateway;
         });

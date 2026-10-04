@@ -15,6 +15,11 @@ class TariffController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'route_type' => 'nullable|in:DOMESTIC,FOREIGN',
+            'service_type' => 'nullable|in:ARRASTRE,STEVEDORING,OTHER',
+        ]);
+
         $user = $request->user();
 
         $tariffs = Tariff::with(['versions' => function ($q) {
@@ -27,7 +32,10 @@ class TariffController extends Controller
         }])
             ->where('organization_id', $user->organization_id)
             ->where('is_active', true)
+            ->when(! empty($validated['route_type']), fn ($q) => $q->where('route_type', $validated['route_type']))
+            ->when(! empty($validated['service_type']), fn ($q) => $q->where('service_type', $validated['service_type']))
             ->orderBy('tariff_code', 'asc')
+            ->orderBy('service_type', 'asc')
             ->get();
 
         return response()->json([

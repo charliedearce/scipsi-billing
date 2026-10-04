@@ -39,6 +39,7 @@ import { resetRouterState } from '@/router/guards/beforeEach'
 import { useMenuStore } from './menu'
 import { StorageConfig } from '@/utils/storage/storage-config'
 import { clearPwaRecoveryState, purgePwaCaches } from '@/utils/pwa/pwa-session'
+import { useRealtimeStore } from './realtime'
 
 /**
  * 用户状态管理
@@ -73,8 +74,16 @@ export const useUserStore = defineStore(
      * 设置用户信息
      * @param newInfo 新的用户信息
      */
-    const setUserInfo = (newInfo: Api.Auth.UserInfo) => {
-      info.value = newInfo
+    const setUserInfo = (newInfo: Api.Auth.UserInfo | Record<string, unknown>) => {
+      const raw = { ...newInfo } as Record<string, unknown>
+      // Laravel `/auth/me` returns `id`; Art Design Pro templates expect `userId`.
+      if (raw.userId == null && raw.id != null) {
+        raw.userId = Number(raw.id)
+      }
+      if (raw.userName == null && typeof raw.name === 'string') {
+        raw.userName = raw.name
+      }
+      info.value = raw as unknown as Api.Auth.UserInfo
     }
 
     /**
@@ -157,6 +166,12 @@ export const useUserStore = defineStore(
       purgePwaCaches().catch(() => {
         // Non-fatal: server-side session revocation is the authority
       })
+      // W27: disconnect Reverb / clear notification listeners
+      try {
+        useRealtimeStore().teardown()
+      } catch {
+        // Non-fatal during logout
+      }
       // 跳转到登录页，携带当前路由作为 redirect 参数
       const currentRoute = router.currentRoute.value
       const redirect = currentRoute.path !== '/login' ? currentRoute.fullPath : undefined

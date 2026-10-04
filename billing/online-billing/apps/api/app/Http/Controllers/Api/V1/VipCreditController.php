@@ -8,6 +8,7 @@ use App\Models\CreditPolicyVersion;
 use App\Models\CustomerCreditAccount;
 use App\Models\VipCreditRepaymentSubmission;
 use App\Services\Billing\VipCreditService;
+use App\Support\SafeBroadcast;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -39,6 +40,19 @@ class VipCreditController extends Controller
         $this->refresh($policy->organization_id, 'credit_policies', 'credit_policy_version', $policy->id, 'published', $policy->lock_version);
 
         return response()->json(['data' => $policy, 'message' => 'VIP credit policy published. Existing charged bills retain their captured terms.']);
+    }
+
+    public function deletePolicy(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'expected_lock_version' => ['required', 'integer', 'min:1'],
+        ]);
+        $policy = CreditPolicyVersion::where('organization_id', $request->user()->organization_id)->findOrFail($id);
+        $organizationId = $policy->organization_id;
+        $this->service->deletePolicyDraft($policy, $request->user(), (int) $data['expected_lock_version']);
+        $this->refresh($organizationId, 'credit_policies', 'credit_policy_version', $id, 'draft_deleted', (int) $data['expected_lock_version']);
+
+        return response()->json(['message' => 'VIP credit policy draft deleted.']);
     }
 
     public function accounts(Request $request): JsonResponse
@@ -106,7 +120,7 @@ class VipCreditController extends Controller
             'allocations.*.requested_amount' => ['required', 'regex:/^\d+(\.\d{1,2})?$/'],
         ]);
         $submission = $this->service->submitRepayment($request->user(), $data);
-        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'submitted', $submission->lock_version);
+        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'submitted', $submission->lock_version, $submission->submitted_by_user_id);
 
         return response()->json(['data' => $submission, 'message' => 'VIP repayment proof submitted for authorized staff verification. Pending evidence does not change your credit balance.'], 201);
     }
@@ -116,7 +130,7 @@ class VipCreditController extends Controller
         $data = $request->validate(['proof_file_id' => ['nullable', 'integer']]);
         $submission = VipCreditRepaymentSubmission::where('organization_id', $request->user()->organization_id)->findOrFail($id);
         $submission = $this->service->resubmitRepayment($submission, $request->user(), $data);
-        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'resubmitted', $submission->lock_version);
+        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'resubmitted', $submission->lock_version, $submission->submitted_by_user_id);
 
         return response()->json(['data' => $submission, 'message' => 'Corrected VIP repayment proof returned to the review queue with its original priority.']);
     }
@@ -134,7 +148,7 @@ class VipCreditController extends Controller
         if (! $submission) {
             return response()->json(['data' => null, 'message' => 'No VIP repayment proofs are waiting in the review queue.']);
         }
-        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'claimed', $submission->lock_version);
+        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'claimed', $submission->lock_version, $submission->submitted_by_user_id);
 
         return response()->json(['data' => $submission, 'message' => 'Oldest VIP repayment proof claimed for review.']);
     }
@@ -144,13 +158,14 @@ class VipCreditController extends Controller
         $data = $request->validate([
             'expected_version' => ['required', 'integer', 'min:1'],
             'confirmed_reference' => ['required', 'string', 'min:3', 'max:128'],
+            'receipt_kind' => ['nullable', 'string', 'in:OFFICIAL,ACKNOWLEDGEMENT'],
             'allocations' => ['required', 'array', 'min:1'],
             'allocations.*.invoice_id' => ['required', 'integer'],
             'allocations.*.cash_amount' => ['required', 'regex:/^\d+(\.\d{1,2})?$/'],
         ]);
         $submission = VipCreditRepaymentSubmission::where('organization_id', $request->user()->organization_id)->findOrFail($id);
         $submission = $this->service->approveRepayment($submission, $request->user(), $data);
-        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'approved', $submission->lock_version);
+        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'approved', $submission->lock_version, $submission->submitted_by_user_id);
 
         return response()->json(['data' => $submission, 'message' => 'VIP repayment verified and posted as one collection receipt with explicit allocations.']);
     }
@@ -160,7 +175,7 @@ class VipCreditController extends Controller
         $data = $request->validate(['expected_version' => ['required', 'integer', 'min:1'], 'reason' => ['required', 'string', 'min:3', 'max:1000']]);
         $submission = VipCreditRepaymentSubmission::where('organization_id', $request->user()->organization_id)->findOrFail($id);
         $submission = $this->service->rejectRepayment($submission, $request->user(), (int) $data['expected_version'], $data['reason']);
-        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'rejected', $submission->lock_version);
+        $this->refresh($submission->organization_id, 'vip_credit', 'vip_credit_repayment_submission', $submission->id, 'rejected', $submission->lock_version, $submission->submitted_by_user_id);
 
         return response()->json(['data' => $submission, 'message' => 'VIP repayment proof rejected. No receipt or credit-balance change was made.']);
     }
@@ -202,12 +217,17 @@ class VipCreditController extends Controller
         ]);
     }
 
-    protected function refresh(int $organizationId, string $topic, string $entityType, int $entityId, string $action, int $version): void
+    protected function refresh(int $organizationId, string $topic, string $entityType, int $entityId, string $action, int $version, ?int $userId = null): void
     {
-        try {
-            broadcast(new DataRefreshEvent($organizationId, $topic, $entityType, $entityId, $action, $version));
-        } catch (\Throwable $exception) {
-            report($exception); // Realtime is a wake-up only; committed finance remains authoritative.
-        }
+        SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
+            $organizationId,
+            $topic,
+            $entityType,
+            $entityId,
+            $action,
+            $version,
+            $userId,
+            $userId === null,
+        ));
     }
 }

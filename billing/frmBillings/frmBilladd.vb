@@ -56,10 +56,10 @@
             Else
 
                 txtQty.Focus()
+                qtyvalidate()
                 computation()
                 'vService()
                 'vCargo()
-                qtyvalidate()
                 addItem()
                 viewItem()
                 frmBilling.txtNotice.Text = ""

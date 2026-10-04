@@ -136,7 +136,7 @@ class DocumentRendererService
             }
 
             if ($type === 'static_text') {
-                $text = htmlspecialchars((string) ($el['text'] ?? ''));
+                $text = nl2br(htmlspecialchars((string) ($el['text'] ?? ''), ENT_QUOTES, 'UTF-8'), false);
                 $out .= "<div class=\"element\" style=\"{$style}\">{$text}</div>";
             } elseif ($type === 'bound_text') {
                 $val = $this->resolveDataField($data, (string) ($el['field'] ?? ''));
@@ -248,6 +248,44 @@ class DocumentRendererService
             ];
         }
 
+        if (in_array($documentKind, ['COLLECTION_RECEIPT', 'ACKNOWLEDGEMENT_RECEIPT'], true)) {
+            $isAck = $documentKind === 'ACKNOWLEDGEMENT_RECEIPT';
+
+            return [
+                'receipt' => [
+                    'receipt_number' => $isAck ? 'ACK-0000000001' : 'CR-0000000001',
+                    'receipt_date' => date('Y-m-d'),
+                    'currency' => 'PHP',
+                    'series_code' => $isAck ? 'ACK-GENSAN-2026' : 'CR-GENSAN-2026',
+                    'receipt_kind' => $isAck ? 'ACKNOWLEDGEMENT' : 'OFFICIAL',
+                    'counts_as_official_receipt' => ! $isAck,
+                    'document_title' => $isAck ? 'ACKNOWLEDGEMENT RECEIPT' : 'COLLECTION RECEIPT / OFFICIAL RECEIPT',
+                    'fiscal_notice' => $isAck
+                        ? 'This acknowledgement receipt records internal settlement only. It is not an Official Receipt and must not be treated as a BIR fiscal OR issuance.'
+                        : 'This collection receipt / official receipt records verified settlement.',
+                ],
+                'issuer' => [
+                    'registered_name' => 'SOUTH COTABATO INTEGRATED PORT SERVICES, INC.',
+                    'tin' => '000-123-456-000',
+                    'address' => 'Makar Wharf, General Santos City, South Cotabato, Philippines',
+                    'bir_permit' => $isAck ? '' : 'BIR-CAS-2026-00129-GENSAN',
+                ],
+                'payer' => [
+                    'registered_name' => 'SAMPLE CUSTOMER, INC.',
+                    'tin' => '111-222-333-000',
+                ],
+                'totals' => [
+                    'cash_received' => '10,000.00',
+                    'withholding_received' => '0.00',
+                    'applied_amount' => '10,000.00',
+                    'unapplied_amount' => '0.00',
+                ],
+                'items' => [
+                    ['invoice_number' => 'SI-0000000123', 'cash_applied' => '10,000.00', 'withholding_applied' => '0.00', 'applied_amount' => '10,000.00'],
+                ],
+            ];
+        }
+
         return [
             'invoice' => [
                 'invoice_number' => 'SI-0000001234',
@@ -268,6 +306,13 @@ class DocumentRendererService
                 'tin' => '123-456-789-0000',
                 'branch_code' => '0000',
                 'address' => 'Cannery Site, Polomolok, South Cotabato',
+            ],
+            'shipment' => [
+                'vessel_name' => 'HONDURAS',
+                'voyage' => '102',
+                'movement' => 'IN',
+                'route' => 'Domestic',
+                'notes' => 'Sample notes',
             ],
             'totals' => [
                 'vatable_sales' => '10,000.00',

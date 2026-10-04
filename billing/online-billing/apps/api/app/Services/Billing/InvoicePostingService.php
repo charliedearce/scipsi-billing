@@ -38,6 +38,8 @@ class InvoicePostingService
             throw new ConcurrencyException("Invoice posting conflict: current version is {$invoice->lock_version}, expected {$expectedVersion}.");
         }
 
+        InvoiceShipment::assertComplete($invoice);
+
         // Validate BIR Fiscal Readiness (P0-06 / P2-06 boundary)
         $fiscalValidation = $this->fiscalService->validateFiscalReadiness($invoice);
         if (! $fiscalValidation['is_fiscal_ready']) {
@@ -61,6 +63,19 @@ class InvoicePostingService
             if ($lockedInvoice->lock_version !== $expectedVersion) {
                 throw new ConcurrencyException("Invoice posting conflict: current version is {$lockedInvoice->lock_version}, expected {$expectedVersion}.");
             }
+
+            // Repair drafts whose document_revisions lagged invoice.lock_version
+            // (e.g. queue/walk-in drafts created without an initial revision).
+            $this->revisionService->alignLockVersion(
+                organizationId: $lockedInvoice->organization_id,
+                locationId: $lockedInvoice->location_id,
+                documentType: 'INVOICE',
+                documentId: $lockedInvoice->id,
+                actor: $actor,
+                snapshot: $lockedInvoice->fresh(['items.pricingSnapshot', 'customer', 'buyerProfileVersion'])->toArray(),
+                targetLockVersion: $expectedVersion,
+                reason: 'Align invoice revision before posting'
+            );
 
             [$period, $backdateAuthorization] = $this->periodService->consumeForIssuance(
                 organizationId: $lockedInvoice->organization_id,
@@ -101,7 +116,7 @@ class InvoicePostingService
                 'buyer_snapshot_name' => $buyerProfileVersion->registered_name,
                 'buyer_snapshot_trade_name' => $buyerProfileVersion->trade_name,
                 'buyer_snapshot_tin' => $buyerProfileVersion->tin,
-                'buyer_snapshot_branch_code' => $buyerProfileVersion->branch_code,
+                'buyer_snapshot_branch_code' => $buyerProfileVersion->branch_code ?: '00000',
                 'buyer_snapshot_tax_classification' => $buyerProfileVersion->tax_classification,
                 'buyer_snapshot_address' => $buyerProfileVersion->billing_address,
                 'buyer_snapshot_email' => $buyerProfileVersion->contact_email,

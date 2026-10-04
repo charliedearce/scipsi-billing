@@ -31,22 +31,27 @@ class ReceiptIssuanceArtifactService
     {
         $existing = DocumentArtifact::where('document_type', 'RECEIPT')->where('document_id', $receipt->id)->where('artifact_type', 'CANONICAL_PDF')->first();
         if ($existing) {
-            if ($existing->status === 'RENDERED') {
+            if ($existing->status === 'RENDERED' && $existing->existsOnDisk()) {
                 $this->dispatchArtifactReadyNotice($receipt);
+
+                return $existing;
             }
 
-            return $existing;
+            // Recover FAILED / missing-file artifacts without creating a second canonical row.
+            return $this->retryFailedArtifact($existing, $actor);
         }
-        $version = $this->studioService->resolveActiveTemplate($receipt->organization_id, 'COLLECTION_RECEIPT', $receipt->location_id, $receipt->series_id);
+        $documentKind = $receipt->documentClass();
+        $version = $this->studioService->resolveActiveTemplate($receipt->organization_id, $documentKind, $receipt->location_id, $receipt->series_id);
         if (! $version) {
-            $template = DocumentTemplate::where('organization_id', $receipt->organization_id)->where('document_kind', 'COLLECTION_RECEIPT')->first();
+            $template = DocumentTemplate::where('organization_id', $receipt->organization_id)->where('document_kind', $documentKind)->first();
             $version = $template?->publishedVersion ?? $template?->latestVersion;
         }
         if (! $version) {
-            throw new \RuntimeException('No active collection receipt template is configured.');
+            $label = $receipt->isAcknowledgement() ? 'acknowledgement receipt' : 'collection receipt';
+            throw new \RuntimeException("No active {$label} template is configured.");
         }
         $payload = $this->buildRenderPayload($receipt);
-        $snapshot = DocumentSnapshot::create(['organization_id' => $receipt->organization_id, 'document_type' => 'RECEIPT', 'document_id' => $receipt->id, 'document_kind' => 'COLLECTION_RECEIPT', 'template_version_id' => $version->id, 'routing_metadata' => ['template_code' => $version->template->code, 'template_version' => $version->version_number, 'resolved_at' => now()->toIso8601String()], 'payload_snapshot' => $payload, 'renderer_version' => 'dompdf 3.1.6']);
+        $snapshot = DocumentSnapshot::create(['organization_id' => $receipt->organization_id, 'document_type' => 'RECEIPT', 'document_id' => $receipt->id, 'document_kind' => $documentKind, 'template_version_id' => $version->id, 'routing_metadata' => ['template_code' => $version->template->code, 'template_version' => $version->version_number, 'receipt_kind' => $receipt->receipt_kind, 'counts_as_official_receipt' => $receipt->counts_as_official_receipt, 'resolved_at' => now()->toIso8601String()], 'payload_snapshot' => $payload, 'renderer_version' => 'dompdf 3.1.6']);
         $path = "artifacts/receipts/{$receipt->organization_id}/{$receipt->id}/snap_{$snapshot->id}.pdf";
         try {
             $pdf = $this->renderer->renderToPdf($version->layout_definition, $payload, $receipt->organization_id);
@@ -63,14 +68,76 @@ class ReceiptIssuanceArtifactService
         }
     }
 
+    /**
+     * Re-render a FAILED (or missing-file) receipt artifact from its frozen snapshot.
+     */
+    public function retryFailedArtifact(DocumentArtifact $artifact, ?User $actor = null): DocumentArtifact
+    {
+        $snapshot = $artifact->snapshot;
+        if (! $snapshot) {
+            throw new \RuntimeException("Receipt artifact {$artifact->id} has no frozen snapshot to retry.");
+        }
+
+        $layout = $snapshot->templateVersion?->layout_definition;
+        $payload = $snapshot->payload_snapshot;
+        if (! is_array($layout) || ! is_array($payload)) {
+            throw new \RuntimeException("Receipt artifact {$artifact->id} snapshot is incomplete for retry.");
+        }
+
+        try {
+            $pdf = $this->renderer->renderToPdf($layout, $payload, $artifact->organization_id);
+            Storage::disk('private')->put($artifact->file_path, $pdf);
+
+            $artifact->update([
+                'file_size_bytes' => strlen($pdf),
+                'sha256_hash' => hash('sha256', $pdf),
+                'status' => 'RENDERED',
+                'error_message' => null,
+                'rendered_at' => now(),
+            ]);
+
+            $receipt = Receipt::find($artifact->document_id);
+            if ($receipt) {
+                $this->dispatchArtifactReadyNotice($receipt);
+            }
+
+            return $artifact->fresh();
+        } catch (Throwable $exception) {
+            Log::error('Failed to retry collection receipt PDF artifact', [
+                'artifact_id' => $artifact->id,
+                'receipt_id' => $artifact->document_id,
+                'exception' => $exception->getMessage(),
+            ]);
+            $artifact->update([
+                'status' => 'FAILED',
+                'error_message' => $exception->getMessage(),
+            ]);
+
+            return $artifact->fresh();
+        }
+    }
+
     public function buildRenderPayload(Receipt $receipt): array
     {
         $receipt->loadMissing(['organization', 'series', 'tenders', 'allocations.invoice']);
         $payer = $receipt->payer_snapshot;
 
         return [
-            'receipt' => ['receipt_number' => $receipt->receipt_number, 'receipt_date' => Carbon::parse($receipt->posted_at)->format('Y-m-d'), 'currency' => $receipt->currency, 'series_code' => $receipt->series?->series_code],
-            'issuer' => ['registered_name' => $receipt->allocations->first()?->invoice?->issuer_snapshot_name ?? $receipt->organization?->name, 'tin' => $receipt->allocations->first()?->invoice?->issuer_snapshot_tin ?? '', 'address' => $this->addressText($receipt->allocations->first()?->invoice?->issuer_snapshot_address), 'bir_permit' => $receipt->allocations->first()?->invoice?->issuer_snapshot_permit_no ?? ''],
+            'receipt' => [
+                'receipt_number' => $receipt->receipt_number,
+                'receipt_date' => Carbon::parse($receipt->posted_at)->format('Y-m-d'),
+                'currency' => $receipt->currency,
+                'series_code' => $receipt->series?->series_code,
+                'receipt_kind' => $receipt->receipt_kind,
+                'counts_as_official_receipt' => $receipt->counts_as_official_receipt,
+                'document_title' => $receipt->isAcknowledgement()
+                    ? 'ACKNOWLEDGEMENT RECEIPT'
+                    : 'COLLECTION RECEIPT / OFFICIAL RECEIPT',
+                'fiscal_notice' => $receipt->isAcknowledgement()
+                    ? 'This acknowledgement receipt records internal settlement only. It is not an Official Receipt and must not be treated as a BIR fiscal OR issuance.'
+                    : 'This collection receipt / official receipt records verified settlement.',
+            ],
+            'issuer' => ['registered_name' => $receipt->allocations->first()?->invoice?->issuer_snapshot_name ?? $receipt->organization?->name, 'tin' => $receipt->allocations->first()?->invoice?->issuer_snapshot_tin ?? '', 'address' => $this->addressText($receipt->allocations->first()?->invoice?->issuer_snapshot_address), 'bir_permit' => $receipt->isAcknowledgement() ? '' : ($receipt->allocations->first()?->invoice?->issuer_snapshot_permit_no ?? '')],
             'payer' => $payer,
             'totals' => ['cash_received' => number_format((float) $receipt->cash_received_amount, 2), 'withholding_received' => number_format((float) $receipt->withholding_received_amount, 2), 'applied_amount' => number_format((float) $receipt->applied_amount, 2), 'unapplied_amount' => number_format((float) $receipt->unapplied_amount, 2)],
             'items' => $receipt->allocations->map(fn ($allocation) => ['invoice_number' => $allocation->invoice?->invoice_number ?? (string) $allocation->invoice_id, 'cash_applied' => number_format((float) $allocation->cash_applied_amount, 2), 'withholding_applied' => number_format((float) $allocation->withholding_applied_amount, 2), 'applied_amount' => number_format((float) $allocation->applied_amount, 2)])->all(),

@@ -4,7 +4,9 @@ User requirement W29, recorded 2026-09-19. Administrators must be able to classi
 
 ## Legacy boundary and target model
 
-The current source tariff master records tariff identity, classification, route/service rate components and service mapping, but does not evidence effective-dated VAT/PPA/fuel rules. Legacy VAT/PPA are bill-level controls using global percentages, and its fuel input is a teller-entered multiplier that mutates the base rate/gross and can disable PPA for the entire bill. That source behavior is a compatibility fixture to study, not a target rule to copy.
+The current source tariff master records tariff identity, classification, route/service rate components and service mapping, but does not evidence effective-dated VAT/PPA/fuel rules. Legacy VAT/PPA are bill-level controls using global percentages, and its fuel input is a teller-entered multiplier that mutates the base rate/gross and can disable PPA for the entire bill. The online model retains versioned fuel bands and transparent components. On 2026-09-25 the user directed Fuel mode to follow the VB numeric and PPA behavior: retain centavos in the adjusted rate, round final fuel gross to a whole peso, and suppress PPA across the bill. The online policy still supplies the percentage; the original tariff PPA classification is snapshotted with the suppression reason.
+
+The user's later 2026-09-25 Dangerous cargo direction preserves its distinct VB behavior: multiply the tariff rate by the entered factor, display/save the adjusted rate to centavos, and calculate gross from the unrounded adjusted rate × quantity before rounding gross to centavos. Dangerous cargo continues to use the tariff's PPA rule. For example, rate 107.20 × factor 0.92 × quantity 7 displays rate 98.62 and gross 690.37.
 
 The online model makes each tariff version declare the following controlled classifications:
 
@@ -34,8 +36,8 @@ At server calculation/posting, use the invoice's locked business date/time, neve
 1. Resolve the active tariff version for the item, location/service/route and business date.
 2. Resolve its approved tax treatment and, when applicable, PPA policy/rule version.
 3. If the tariff is fuel-surcharge applicable, resolve the active fuel schedule and its authorized fuel-price observation, then exactly one matching price band.
-4. Calculate the surcharge with decimal arithmetic and the schedule's approved basis/rounding rule. Store it as a distinct invoice component/line with amount, rate and basis.
-5. Recalculate the tax/PPA result under the captured versioned ordering matrix. Snapshot every resolved policy/version, source price, band, basis, inputs and final amounts with the invoice item.
+4. Calculate the surcharge with decimal arithmetic. For an active positive Fuel band, use `factor = 1 + band_fraction`, show/store the adjusted rate rounded to centavos, and round full-precision `quantity × tariff_rate × factor` to the nearest whole peso (half away from zero). Store the difference between rounded gross and the two-decimal base gross as the distinct fuel component so line and header amounts reconcile. A zero band leaves base gross unchanged. Snapshot the rounding method, inputs, rate and resulting amounts.
+5. Fuel mode suppresses PPA for every line on the bill, including lines without a fuel component. Other modes use each tariff's PPA policy. Recalculate tax from the resulting net under the captured treatment; snapshot every resolved policy/version, source price, band, basis, original PPA classification, applied suppression, inputs and final amounts with the invoice item.
 
 If an applicable tariff has no valid published fuel observation, schedule or matching band, the server returns a configuration error before posting. It must not silently charge zero, use the latest unapproved price, or reuse a stale schedule. A time-critical exceptional rate requires a separately authorized, reasoned published emergency version; direct post-time overrides are not the initial design.
 

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Art Design Pro UI"
+  short_description: "Keep frontend work native to Art Design Pro"
+  default_prompt: "Use $art-design-pro-ui to implement this UI change in the repository's existing Art Design Pro visual system."
+policy:
+  allow_implicit_invocation: true

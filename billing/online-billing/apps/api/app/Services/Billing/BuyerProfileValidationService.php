@@ -52,32 +52,25 @@ class BuyerProfileValidationService
     }
 
     /**
-     * Evaluate required P0-06 Philippine BIR fiscal buyer fields.
+     * Evaluate buyer fields needed before invoice posting.
+     *
+     * Registered buyer name remains required. TIN, branch code and billing address are
+     * optional profile inputs: when the customer/teller leaves them blank, posting may
+     * proceed and the issued snapshot stores null/defaults. When TIN is supplied, it must
+     * be a usable numeric TIN (at least 9 digits). Stronger P0-06 accountant rules can
+     * tighten this later without rewriting issued snapshots.
      */
     public function checkFiscalReadiness(BuyerProfileVersion $version): array
     {
         $missing = [];
 
-        // 1. Registered Name (official corporate or individual business name)
         if (empty(trim((string) $version->registered_name))) {
             $missing[] = 'registered_name';
         }
 
-        // 2. Tax Identification Number (TIN)
-        $cleanTin = preg_replace('/[^0-9]/', '', (string) $version->tin);
-        if (empty($cleanTin) || strlen($cleanTin) < 9) {
+        $cleanTin = preg_replace('/[^0-9]/', '', (string) ($version->tin ?? ''));
+        if ($cleanTin !== '' && strlen($cleanTin) < 9) {
             $missing[] = 'tin';
-        }
-
-        // 3. Branch Code (default '00000' or 3-5 digit code)
-        if (empty(trim((string) $version->branch_code))) {
-            $missing[] = 'branch_code';
-        }
-
-        // 4. Complete Billing Address
-        $address = $version->billing_address;
-        if (! is_array($address) || empty($address['street']) || empty($address['city'])) {
-            $missing[] = 'billing_address';
         }
 
         return $missing;

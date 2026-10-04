@@ -83,7 +83,9 @@ class PpaPaymentVerificationTest extends TestCase
             ->assertJsonPath('data.settlement_status', 'PARTIALLY_PAID')
             ->assertJsonPath('data.applied_amount', '100.00')
             ->assertJsonPath('data.confirmed_receipt_count', 1)
+            ->assertJsonPath('data.reversed_receipt_count', 0)
             ->assertJsonPath('data.receipts.0.applied_amount', '100.00')
+            ->assertJsonPath('data.receipts.0.receipt_status', 'POSTED')
             ->assertJsonPath('data.formal_clearance_issued', false);
         $this->assertArrayNotHasKey('payer_snapshot', $partial->json('data.receipts.0'));
         $this->assertArrayNotHasKey('reference', $partial->json('data.receipts.0'));
@@ -103,6 +105,147 @@ class PpaPaymentVerificationTest extends TestCase
             $paid->json('data.receipts.0.receipt_number'),
         );
         $this->assertDatabaseCount('ppa_verification_events', 2);
+    }
+
+    public function test_ppa_sees_reversed_receipt_as_history_without_counting_it_as_paid(): void
+    {
+        $executor = User::create([
+            'organization_id' => $this->admin->organization_id,
+            'name' => 'PPA Reversal Executor',
+            'email' => 'ppa.reversal.executor@example.test',
+            'password' => 'Password123!',
+            'status' => 'active',
+            'lock_version' => 1,
+        ]);
+        $executor->roles()->attach(Role::where('name', 'Administrator')->firstOrFail());
+
+        $invoice = $this->postedInvoice();
+        $this->postReceipt($invoice->id, (string) $invoice->total_charge_amount, 'PPA-REVERSE-001');
+        $receipt = Receipt::where('customer_id', $this->customer->id)->orderByDesc('id')->firstOrFail();
+
+        $paid = $this->actingAs($this->ppa, 'sanctum')
+            ->getJson('/api/v1/ppa/bills/'.$invoice->invoice_number.'/settlement')
+            ->assertOk()
+            ->assertJsonPath('data.settlement_status', 'PAID')
+            ->assertJsonPath('data.confirmed_receipt_count', 1)
+            ->assertJsonPath('data.reversed_receipt_count', 0)
+            ->assertJsonPath('data.clearance_eligibility', 'FULLY_PAID');
+        $this->assertSame($receipt->receipt_number, $paid->json('data.receipts.0.receipt_number'));
+        $this->assertSame('POSTED', $paid->json('data.receipts.0.receipt_status'));
+
+        $requestId = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/document-correction-requests', [
+            'document_type' => 'RECEIPT',
+            'document_id' => $receipt->id,
+            'requested_action' => 'RECEIPT_REVERSAL',
+            'reason' => 'Bank credit must be reversed so PPA sees unpaid history.',
+        ])->assertCreated()->json('data.id');
+        $this->actingAs($executor, 'sanctum')->postJson("/api/v1/document-correction-requests/{$requestId}/approve", [
+            'decision_notes' => 'Approve settlement-only reversal for PPA verification coverage.',
+        ])->assertOk();
+        $this->actingAs($executor, 'sanctum')->postJson("/api/v1/document-correction-requests/{$requestId}/execute", [
+            'execution_notes' => 'Execute reversal so confirmed settlement no longer applies.',
+        ])->assertOk();
+
+        $reversed = $this->actingAs($this->ppa, 'sanctum')
+            ->getJson('/api/v1/ppa/bills/'.$invoice->invoice_number.'/settlement')
+            ->assertOk()
+            ->assertJsonPath('data.settlement_status', 'UNPAID')
+            ->assertJsonPath('data.applied_amount', '0.00')
+            ->assertJsonPath('data.outstanding_amount', (string) $invoice->total_charge_amount)
+            ->assertJsonPath('data.confirmed_receipt_count', 0)
+            ->assertJsonPath('data.reversed_receipt_count', 1)
+            ->assertJsonPath('data.clearance_eligibility', 'NOT_ELIGIBLE')
+            ->assertJsonPath('data.formal_clearance_issued', false);
+        $this->assertSame([], $reversed->json('data.receipts'));
+        $this->assertSame($receipt->receipt_number, $reversed->json('data.reversed_receipts.0.receipt_number'));
+        $this->assertSame('REVERSED', $reversed->json('data.reversed_receipts.0.receipt_status'));
+        $this->assertSame((string) $invoice->total_charge_amount, $reversed->json('data.reversed_receipts.0.applied_amount'));
+        $this->assertArrayNotHasKey('payer_snapshot', $reversed->json('data.reversed_receipts.0'));
+        $this->assertArrayNotHasKey('reference', $reversed->json('data.reversed_receipts.0'));
+        $this->assertDatabaseCount('ppa_verification_events', 2);
+    }
+
+    public function test_ppa_can_view_the_issued_invoice_layout_without_recording_a_settlement_check(): void
+    {
+        $invoice = $this->postedInvoice();
+
+        $pdf = $this->actingAs($this->ppa, 'sanctum')
+            ->get('/api/v1/ppa/bills/'.$invoice->invoice_number.'/layout');
+
+        $pdf->assertOk();
+        $pdf->assertHeader('content-type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-', $pdf->streamedContent());
+        $this->assertDatabaseCount('ppa_verification_events', 0);
+
+        $this->actingAs($this->unscopedPpa, 'sanctum')
+            ->getJson('/api/v1/ppa/bills/'.$invoice->invoice_number.'/layout')
+            ->assertForbidden();
+        $this->assertDatabaseCount('ppa_verification_events', 0);
+    }
+
+    public function test_ppa_can_search_an_official_receipt_and_view_its_issued_layout(): void
+    {
+        $invoice = $this->postedInvoice();
+        $this->postReceipt($invoice->id, '100.00', 'PPA-OR-SEARCH-001');
+        $receipt = Receipt::where('customer_id', $this->customer->id)->latest('id')->firstOrFail();
+
+        $found = $this->actingAs($this->ppa, 'sanctum')
+            ->getJson('/api/v1/ppa/documents/'.$receipt->receipt_number)
+            ->assertOk()
+            ->assertJsonPath('data.document_kind', 'OFFICIAL_RECEIPT')
+            ->assertJsonPath('data.receipt_number', $receipt->receipt_number)
+            ->assertJsonPath('data.linked_invoices.0.invoice_number', $invoice->invoice_number);
+        $this->assertArrayNotHasKey('payer_snapshot', $found->json('data'));
+        $this->assertArrayNotHasKey('reference', $found->json('data.linked_invoices.0'));
+
+        $pdf = $this->actingAs($this->ppa, 'sanctum')
+            ->get('/api/v1/ppa/receipts/'.$receipt->receipt_number.'/layout');
+        $pdf->assertOk();
+        $pdf->assertHeader('content-type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-', $pdf->streamedContent());
+        $this->assertDatabaseCount('ppa_verification_events', 0);
+
+        $this->actingAs($this->unscopedPpa, 'sanctum')
+            ->getJson('/api/v1/ppa/documents/'.$receipt->receipt_number)
+            ->assertForbidden();
+
+        $this->actingAs($this->ppa, 'sanctum')
+            ->getJson('/api/v1/ppa/documents/'.$invoice->invoice_number)
+            ->assertOk()
+            ->assertJsonPath('data.document_kind', 'INVOICE')
+            ->assertJsonPath('data.invoice_number', $invoice->invoice_number);
+    }
+
+    public function test_ppa_share_report_lists_only_fully_paid_bills_in_location_scope(): void
+    {
+        $paid = $this->postedInvoice();
+        $this->postReceipt($paid->id, (string) $paid->total_charge_amount, 'PPA-SHARE-PAID-001');
+        $partial = $this->postedInvoice();
+        $this->postReceipt($partial->id, '10.00', 'PPA-SHARE-PARTIAL-001');
+        $date = $paid->business_date->toDateString();
+
+        $report = $this->actingAs($this->ppa, 'sanctum')
+            ->getJson("/api/v1/ppa/share-report?date_from={$date}&date_to={$date}")
+            ->assertOk();
+
+        $numbers = collect($report->json('data.rows'))->pluck('invoice_number');
+        $this->assertTrue($numbers->contains($paid->invoice_number));
+        $this->assertFalse($numbers->contains($partial->invoice_number));
+
+        $row = collect($report->json('data.rows'))->firstWhere('invoice_number', $paid->invoice_number);
+        $this->assertSame((string) $paid->ppa_amount, $row['ppa_share']);
+        $this->assertNotEmpty($row['receipts']);
+        $this->assertArrayNotHasKey('reference', $row['receipts'][0]);
+        $this->assertArrayNotHasKey('payer_snapshot', $row);
+
+        $hidden = $this->actingAs($this->unscopedPpa, 'sanctum')
+            ->getJson("/api/v1/ppa/share-report?date_from={$date}&date_to={$date}")
+            ->assertOk();
+        $this->assertFalse(collect($hidden->json('data.rows'))->pluck('invoice_number')->contains($paid->invoice_number));
+
+        $this->actingAs(User::where('email', 'teller1@scipsi.test')->firstOrFail(), 'sanctum')
+            ->getJson("/api/v1/ppa/share-report?date_from={$date}&date_to={$date}")
+            ->assertForbidden();
     }
 
     public function test_ppa_scope_and_read_only_role_block_foreign_location_and_financial_mutation(): void
@@ -127,6 +270,7 @@ class PpaPaymentVerificationTest extends TestCase
     {
         $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', [
             'customer_id' => $this->customer->id,
+            ...$this->invoiceShipmentPayload(),
             'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]],
         ])->assertCreated();
         $invoiceId = $draft->json('data.id');

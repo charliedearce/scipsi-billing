@@ -10,7 +10,6 @@ use App\Models\Customer;
 use App\Models\CustomerCreditAccount;
 use App\Models\CustomerCreditAccountVersion;
 use App\Models\CustomerUserLink;
-use App\Models\InAppNotification;
 use App\Models\Invoice;
 use App\Models\InvoiceCreditCharge;
 use App\Models\ManualPaymentSubmissionItem;
@@ -23,6 +22,7 @@ use App\Models\User;
 use App\Models\VipCreditRepaymentAllocation;
 use App\Models\VipCreditRepaymentProof;
 use App\Models\VipCreditRepaymentSubmission;
+use App\Services\Notifications\InAppNotificationPublisher;
 use App\Services\Sms\NotificationEventRecorder;
 use App\Services\Sms\SmsDeliveryOrchestrator;
 use Carbon\Carbon;
@@ -46,6 +46,7 @@ class VipCreditService
         protected SmsDeliveryOrchestrator $smsOrchestrator,
         protected NotificationEventRecorder $notificationEvents,
         protected LateChargePolicyService $lateChargePolicies,
+        protected InAppNotificationPublisher $notifications,
     ) {}
 
     /** @return Collection<int, CreditPolicyVersion> */
@@ -88,6 +89,28 @@ class VipCreditService
         });
     }
 
+    public function deletePolicyDraft(CreditPolicyVersion $policy, User $actor, int $expectedVersion): void
+    {
+        DB::transaction(function () use ($policy, $actor, $expectedVersion): void {
+            $locked = CreditPolicyVersion::where('organization_id', $actor->organization_id)
+                ->whereKey($policy->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            if ($locked->status !== CreditPolicyVersion::STATUS_DRAFT) {
+                throw ValidationException::withMessages(['policy' => ['Only a draft credit policy can be deleted.']]);
+            }
+            if ($locked->lock_version !== $expectedVersion) {
+                throw new ConcurrencyException('Credit policy changed since it was loaded. Refresh before deleting.');
+            }
+            if (InvoiceCreditCharge::where('credit_policy_version_id', $locked->id)->exists()) {
+                throw ValidationException::withMessages(['policy' => ['This credit policy is referenced by a credit charge and cannot be deleted.']]);
+            }
+
+            $this->auditPolicy($locked, $actor, 'CREDIT_POLICY_DRAFT_DELETED', 'credit_policies:manage', 'Credit policy draft deleted.');
+            $locked->delete();
+        });
+    }
+
     public function publishPolicy(CreditPolicyVersion $policy, User $actor, int $expectedVersion, string $reason): CreditPolicyVersion
     {
         return DB::transaction(function () use ($policy, $actor, $expectedVersion, $reason): CreditPolicyVersion {
@@ -98,8 +121,13 @@ class VipCreditService
             if ($locked->lock_version !== $expectedVersion) {
                 throw new ConcurrencyException('Credit policy changed since it was loaded. Refresh before publishing.');
             }
+            // Supersede open-ended published windows. Drafts created with an earlier
+            // Effective from than the current published version are advanced so Admin
+            // is not blocked by overlap (the form has no end-date action).
+            $this->preparePublishedCreditPolicyWindow($locked);
             $this->assertNoPublishedOverlap($locked);
             $now = Carbon::now('Asia/Manila');
+            $locked->refresh();
             $locked->update([
                 'status' => CreditPolicyVersion::STATUS_PUBLISHED,
                 'published_by_user_id' => $actor->id,
@@ -207,7 +235,10 @@ class VipCreditService
         $customer = $this->assertPortalAccess($actor, $customerId);
         $account = CustomerCreditAccount::where('organization_id', $actor->organization_id)->where('customer_id', $customer->id)->first();
         if (! $account) {
-            return ['eligible' => false, 'reason' => 'No VIP credit account has been configured for this customer.'];
+            return [
+                'eligible' => false,
+                'reason' => 'No VIP credit account has been configured for this customer. An Administrator must open Customer Accounts, select this VIP client, and publish a VIP Credit profile (status ACTIVE) after a published organization credit policy is in effect.',
+            ];
         }
 
         return $this->summary($account, Carbon::now('Asia/Manila'));
@@ -326,15 +357,14 @@ class VipCreditService
                 $charges[] = $charge;
             }
             $this->auditAccount($account, $actor, 'VIP_CREDIT_CHARGE_ASSIGNED', 'portal.credit.charge', 'Customer charged posted invoices to configured VIP credit terms.');
-            InAppNotification::create([
-                'organization_id' => $actor->organization_id,
-                'user_id' => $actor->id,
-                'type' => 'CREDIT',
-                'title' => 'VIP Credit Terms Assigned',
-                'body' => 'Your selected bill(s) are on credit. Review their individual due dates in My Credit.',
-                'data' => ['customer_credit_account_id' => $account->id, 'invoice_credit_charge_ids' => collect($charges)->pluck('id')->all()],
-                'is_read' => false,
-            ]);
+            $this->notifications->publish(
+                (int) $actor->organization_id,
+                (int) $actor->id,
+                'CREDIT',
+                'VIP Credit Terms Assigned',
+                'Your selected bill(s) are on credit. Review their individual due dates in My Credit.',
+                ['customer_credit_account_id' => $account->id, 'invoice_credit_charge_ids' => collect($charges)->pluck('id')->all()],
+            );
             foreach ($charges as $charge) {
                 $invoice = $invoices->get($charge->invoice_id);
                 $this->dispatchVipTransactionalNotice(
@@ -408,7 +438,7 @@ class VipCreditService
             if ($charges->contains(fn (InvoiceCreditCharge $charge) => strtoupper($charge->currency) !== strtoupper($currency))) {
                 throw ValidationException::withMessages(['allocations' => ['A single bank-transfer repayment must use one currency.']]);
             }
-            $now = Carbon::now('Asia/Manila');
+            $now = Carbon::now('UTC');
             $submission = VipCreditRepaymentSubmission::create([
                 'organization_id' => $actor->organization_id,
                 'customer_credit_account_id' => $account->id,
@@ -486,7 +516,7 @@ class VipCreditService
                 return null;
             }
             CustomerCreditAccount::whereKey($submission->customer_credit_account_id)->lockForUpdate()->firstOrFail();
-            $now = Carbon::now('Asia/Manila');
+            $now = Carbon::now('UTC');
             $submission->update([
                 'status' => VipCreditRepaymentSubmission::STATUS_IN_REVIEW,
                 'assigned_to_user_id' => $teller->id,
@@ -534,10 +564,11 @@ class VipCreditService
                 'customer_id' => $locked->customer_id,
                 'currency' => $locked->currency,
                 'payer_name' => $locked->customer->name,
+                'receipt_kind' => $data['receipt_kind'] ?? Receipt::KIND_OFFICIAL,
                 'allocations' => $postingAllocations,
             ]);
             $this->bankTransferReferences->linkReceipt($reviewer->organization_id, $locked->currency, $normalizedReference, $receipt);
-            $now = Carbon::now('Asia/Manila');
+            $now = Carbon::now('UTC');
             $locked->update([
                 'status' => VipCreditRepaymentSubmission::STATUS_APPROVED,
                 'receipt_id' => $receipt->id,
@@ -554,13 +585,14 @@ class VipCreditService
                 ], $charges->get($allocation->invoice_credit_charge_id), $locked, $receipt);
             }
             $this->auditRepayment($locked, $reviewer, 'VIP_CREDIT_REPAYMENT_APPROVED', 'credit:review_proof', 'VIP bank transfer verified and posted through the shared collection-receipt flow.');
-            InAppNotification::create([
-                'organization_id' => $locked->organization_id, 'user_id' => $locked->submitted_by_user_id,
-                'type' => 'CREDIT', 'title' => 'VIP Credit Repayment Confirmed',
-                'body' => "Your bank repayment was verified. Collection receipt {$receipt->receipt_number} is available.",
-                'data' => ['vip_credit_repayment_submission_id' => $locked->id, 'receipt_id' => $receipt->id, 'receipt_number' => $receipt->receipt_number],
-                'is_read' => false,
-            ]);
+            $this->notifications->publish(
+                (int) $locked->organization_id,
+                (int) $locked->submitted_by_user_id,
+                'CREDIT',
+                'VIP Credit Repayment Confirmed',
+                "Your bank repayment was verified. Collection receipt {$receipt->receipt_number} is available.",
+                ['vip_credit_repayment_submission_id' => $locked->id, 'receipt_id' => $receipt->id, 'receipt_number' => $receipt->receipt_number],
+            );
             $recipient = User::where('organization_id', $locked->organization_id)->whereKey($locked->submitted_by_user_id)->first();
             if ($recipient) {
                 $this->dispatchVipTransactionalNotice(
@@ -573,7 +605,7 @@ class VipCreditService
                         'recipient_name' => $recipient->name,
                         'reference_no' => $receipt->receipt_number,
                         'action_label' => 'VIP credit repayment posted',
-                        'date_formatted' => $now->format('M d, Y'),
+                        'date_formatted' => $now->copy()->setTimezone('Asia/Manila')->format('M d, Y'),
                         'org_name' => 'SCIPSI',
                     ],
                     $this->repaymentLocationIds($locked),
@@ -589,19 +621,21 @@ class VipCreditService
         return DB::transaction(function () use ($submission, $reviewer, $expectedVersion, $reason): VipCreditRepaymentSubmission {
             $locked = VipCreditRepaymentSubmission::where('organization_id', $reviewer->organization_id)->whereKey($submission->id)->lockForUpdate()->firstOrFail();
             $this->assertAssignedReview($locked, $reviewer, $expectedVersion);
-            $now = Carbon::now('Asia/Manila');
+            $now = Carbon::now('UTC');
             $locked->update([
                 'status' => VipCreditRepaymentSubmission::STATUS_REJECTED, 'reviewed_by_user_id' => $reviewer->id,
                 'reviewed_at' => $now, 'rejection_reason' => $reason, 'lock_version' => $locked->lock_version + 1,
             ]);
             $this->accountEvent($locked->account, $reviewer, 'REPAYMENT_PROOF_REJECTED', $reason, ['repayment_submission_id' => $locked->id], null, $locked);
             $this->auditRepayment($locked, $reviewer, 'VIP_CREDIT_REPAYMENT_REJECTED', 'credit:review_proof', 'VIP repayment proof rejected; no receipt or balance mutation occurred.');
-            InAppNotification::create([
-                'organization_id' => $locked->organization_id, 'user_id' => $locked->submitted_by_user_id,
-                'type' => 'CREDIT', 'title' => 'VIP Repayment Proof Needs Correction',
-                'body' => "Your repayment proof needs correction: {$reason}",
-                'data' => ['vip_credit_repayment_submission_id' => $locked->id, 'reason' => $reason], 'is_read' => false,
-            ]);
+            $this->notifications->publish(
+                (int) $locked->organization_id,
+                (int) $locked->submitted_by_user_id,
+                'CREDIT',
+                'VIP Repayment Proof Needs Correction',
+                "Your repayment proof needs correction: {$reason}",
+                ['vip_credit_repayment_submission_id' => $locked->id, 'reason' => $reason],
+            );
             $recipient = User::where('organization_id', $locked->organization_id)->whereKey($locked->submitted_by_user_id)->first();
             if ($recipient) {
                 $this->dispatchVipTransactionalNotice(
@@ -614,7 +648,7 @@ class VipCreditService
                         'recipient_name' => $recipient->name,
                         'reference_no' => 'VIP repayment',
                         'action_label' => 'VIP repayment proof needs correction',
-                        'date_formatted' => $now->format('M d, Y'),
+                        'date_formatted' => $now->copy()->setTimezone('Asia/Manila')->format('M d, Y'),
                         'org_name' => 'SCIPSI',
                     ],
                     $this->repaymentLocationIds($locked),
@@ -646,7 +680,7 @@ class VipCreditService
                     throw ValidationException::withMessages(['allocations' => ['A selected credit bill changed or was paid elsewhere. Refresh your account and submit a new allocation.']]);
                 }
             }
-            $now = Carbon::now('Asia/Manila');
+            $now = Carbon::now('UTC');
             $round = $locked->resubmission_rounds + 1;
             $locked->update([
                 'proof_file_id' => $file->id, 'status' => VipCreditRepaymentSubmission::STATUS_SUBMITTED,
@@ -952,12 +986,73 @@ class VipCreditService
         }
     }
 
+    protected function preparePublishedCreditPolicyWindow(CreditPolicyVersion $candidate): void
+    {
+        $cutover = Carbon::now('Asia/Manila');
+        if ($candidate->effective_from) {
+            $from = $candidate->effective_from->copy()->timezone('Asia/Manila');
+            if ($from->greaterThan($cutover)) {
+                $cutover = $from;
+            }
+        }
+
+        // End every open published window that already started, then ensure cutover is after
+        // any published start that would still block an open-ended draft.
+        $safety = 0;
+        while ($safety < 10) {
+            $safety++;
+            $openEnded = CreditPolicyVersion::where('organization_id', $candidate->organization_id)
+                ->where('status', CreditPolicyVersion::STATUS_PUBLISHED)
+                ->whereNull('effective_to')
+                ->whereKeyNot($candidate->id)
+                ->orderBy('effective_from')
+                ->lockForUpdate()
+                ->get();
+
+            if ($openEnded->isEmpty()) {
+                break;
+            }
+
+            $closedAny = false;
+            foreach ($openEnded as $policy) {
+                $policyStart = $policy->effective_from->copy()->timezone('Asia/Manila');
+                if ($policyStart->lessThan($cutover)) {
+                    $policy->forceFill([
+                        'effective_to' => $cutover,
+                        'lock_version' => $policy->lock_version + 1,
+                    ])->save();
+                    $closedAny = true;
+                }
+            }
+
+            if ($closedAny) {
+                continue;
+            }
+
+            // Remaining open policies start at/after cutover — advance cutover past the latest.
+            $latestStart = $openEnded
+                ->map(fn (CreditPolicyVersion $policy) => $policy->effective_from->copy()->timezone('Asia/Manila')->getTimestamp())
+                ->max();
+            $cutover = Carbon::createFromTimestamp((int) $latestStart, 'Asia/Manila')->addSecond();
+        }
+
+        $candidate->forceFill(['effective_from' => $cutover])->save();
+        $candidate->refresh();
+    }
+
     protected function assertNoPublishedOverlap(CreditPolicyVersion $candidate): void
     {
-        $published = CreditPolicyVersion::where('organization_id', $candidate->organization_id)->where('status', CreditPolicyVersion::STATUS_PUBLISHED)->lockForUpdate()->get();
+        $candidateFrom = $candidate->effective_from->copy()->timezone('Asia/Manila');
+        $candidateTo = $candidate->effective_to?->copy()->timezone('Asia/Manila');
+        $published = CreditPolicyVersion::where('organization_id', $candidate->organization_id)
+            ->where('status', CreditPolicyVersion::STATUS_PUBLISHED)
+            ->lockForUpdate()
+            ->get();
         foreach ($published as $policy) {
-            $candidateBefore = $candidate->effective_to && $candidate->effective_to->lessThanOrEqualTo($policy->effective_from);
-            $policyBefore = $policy->effective_to && $policy->effective_to->lessThanOrEqualTo($candidate->effective_from);
+            $policyFrom = $policy->effective_from->copy()->timezone('Asia/Manila');
+            $policyTo = $policy->effective_to?->copy()->timezone('Asia/Manila');
+            $candidateBefore = $candidateTo && $candidateTo->lessThanOrEqualTo($policyFrom);
+            $policyBefore = $policyTo && $policyTo->lessThanOrEqualTo($candidateFrom);
             if (! $candidateBefore && ! $policyBefore) {
                 throw ValidationException::withMessages(['effective_from' => ["Credit policy window overlaps published version {$policy->version_number}."]]);
             }

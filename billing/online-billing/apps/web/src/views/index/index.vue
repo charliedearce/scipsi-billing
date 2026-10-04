@@ -24,7 +24,21 @@
 
 <script setup lang="ts">
   import AnnouncementBanner from '@/components/announcements/AnnouncementBanner.vue'
+  import { useRealtimeStore } from '@/store/modules/realtime'
+  import { useUserStore } from '@/store/modules/user'
+
   defineOptions({ name: 'AppLayout' })
+
+  const userStore = useUserStore()
+  const realtimeStore = useRealtimeStore()
+
+  onMounted(() => {
+    if (userStore.isLogin) {
+      realtimeStore.bootstrap().catch(() => {
+        // Non-fatal: polling fallback inside store when Echo is unavailable
+      })
+    }
+  })
 </script>
 
 <style lang="scss" scoped>

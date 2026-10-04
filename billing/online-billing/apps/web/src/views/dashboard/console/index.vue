@@ -1,5 +1,7 @@
 <template>
   <TellerWorkboard v-if="isTeller && !isAdmin" />
+  <AdminOverview v-else-if="isAdmin" />
+  <PpaWorkboard v-else-if="isPpa" />
   <div v-else class="dashboard-console-container max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
     <!-- Welcome Header Banner -->
     <div
@@ -238,6 +240,8 @@
   } from '@element-plus/icons-vue'
   import { useUserStore } from '@/store/modules/user'
   import TellerWorkboard from './TellerWorkboard.vue'
+  import AdminOverview from './AdminOverview.vue'
+  import PpaWorkboard from './PpaWorkboard.vue'
 
   defineOptions({ name: 'Console' })
 
@@ -255,17 +259,16 @@
     () => roles.value.includes('Administrator') || roles.value.includes('R_SUPER')
   )
   const isTeller = computed(() => roles.value.includes('Teller'))
-  const isCustomer = computed(
-    () => roles.value.includes('Customer') || (!isAdmin.value && !isTeller.value)
-  )
+  const isPpa = computed(() => roles.value.includes('PPA user'))
+  const isCustomer = computed(() => roles.value.includes('Customer'))
 
   const primaryRole = computed(() => {
     if (isAdmin.value) return 'Administrator'
     if (isTeller.value) return 'Teller'
+    if (isPpa.value) return 'PPA user'
     if (isCustomer.value) return 'Customer Portal'
     return roles.value[0] || 'Member'
   })
-
   const currentDate = computed(() => {
     return new Intl.DateTimeFormat('en-PH', {
       weekday: 'short',

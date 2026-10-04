@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\WalkInCustomer;
+use App\Services\Billing\InvoiceShipment;
 use App\Services\Billing\WalkInBillingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,7 +30,7 @@ class WalkInBillingController extends Controller
         $orgId = $user->organization_id;
 
         $query = WalkInCustomer::where('organization_id', $orgId)
-            ->with(['location', 'creator', 'portalCustomer'])
+            ->with(['location', 'creator', 'portalCustomer', 'invoices:id,walk_in_customer_id,invoice_number,status,business_date,total_charge_amount'])
             ->orderBy('created_at', 'desc');
 
         if ($request->filled('location_id')) {
@@ -92,15 +93,41 @@ class WalkInBillingController extends Controller
     }
 
     /**
+     * Update walk-in buyer fields before posting (e.g. clear incomplete TIN).
+     * PATCH /api/v1/teller/walk-in/customers/{id}
+     */
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'buyer_name' => 'sometimes|string|max:255',
+            'buyer_tin' => 'nullable|string|max:32',
+            'buyer_branch_code' => 'nullable|string|max:10',
+            'buyer_address' => 'nullable|string|max:1024',
+            'contact_mobile' => 'nullable|string|max:32',
+            'contact_email' => 'nullable|email|max:255',
+        ]);
+
+        $orgId = $request->user()->organization_id;
+        $walkIn = WalkInCustomer::where('organization_id', $orgId)->findOrFail($id);
+
+        $updated = $this->service->updateWalkInBuyerFields(
+            teller: $request->user(),
+            walkIn: $walkIn,
+            buyerData: $validated,
+        );
+
+        return response()->json($updated->load(['location', 'creator', 'portalCustomer', 'invoices']));
+    }
+
+    /**
      * Create a blank invoice draft from a walk-in customer record.
      * POST /api/v1/teller/walk-in/customers/{id}/invoice-draft
      */
     public function createInvoiceDraft(Request $request, int $id): JsonResponse
     {
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'business_date' => 'required|date|date_format:Y-m-d',
-            'notes' => 'nullable|string|max:1000',
-        ]);
+        ], InvoiceShipment::rules()));
 
         $orgId = $request->user()->organization_id;
         $walkIn = WalkInCustomer::where('organization_id', $orgId)->findOrFail($id);
@@ -109,7 +136,8 @@ class WalkInBillingController extends Controller
             teller: $request->user(),
             walkIn: $walkIn,
             businessDate: $validated['business_date'],
-            notes: $validated['notes'] ?? null,
+            notes: $validated['notes'],
+            shipment: $validated,
         );
 
         return response()->json($invoice->load(['customer', 'walkInCustomer']), 201);

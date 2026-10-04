@@ -7,11 +7,12 @@ use App\Models\Customer;
 use App\Models\CustomerTaxEvidenceEvent;
 use App\Models\CustomerTaxExemption;
 use App\Models\CustomerWithholdingCertificate;
-use App\Models\InAppNotification;
 use App\Models\NotificationEvent;
 use App\Models\PrivateFile;
 use App\Models\User;
+use App\Services\Notifications\InAppNotificationPublisher;
 use App\Services\Sms\SmsDeliveryOrchestrator;
+use App\Support\SafeBroadcast;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -19,7 +20,8 @@ use Illuminate\Validation\ValidationException;
 class TaxEvidenceService
 {
     public function __construct(
-        protected SmsDeliveryOrchestrator $smsOrchestrator
+        protected SmsDeliveryOrchestrator $smsOrchestrator,
+        protected InAppNotificationPublisher $notifications,
     ) {}
 
     /**
@@ -123,12 +125,15 @@ class TaxEvidenceService
                 'created_at' => Carbon::now(),
             ]);
 
-            broadcast(new DataRefreshEvent(
+            SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
                 $customer->organization_id,
                 'tax_evidence',
                 'withholding_certificate',
                 $cert->id,
-                'submitted'
+                'submitted',
+                $cert->lock_version,
+                $actor->id,
+                false,
             ));
 
             return $cert->load(['customer', 'privateFile.latestVersion']);
@@ -190,27 +195,29 @@ class TaxEvidenceService
                 'created_at' => $now,
             ]);
 
-            // Notify customer
-            InAppNotification::create([
-                'organization_id' => $cert->organization_id,
-                'user_id' => $cert->customer->users()->first()?->id ?? $reviewer->id,
-                'type' => 'TAX',
-                'title' => "Withholding Certificate Review: {$decision}",
-                'body' => "Your BIR 2307 certificate {$cert->certificate_no} has been {$decision}.".($rejectionReason ? " Reason: {$rejectionReason}" : ''),
-                'data' => [
+            // Notify customer (durable + Reverb wake-up)
+            $this->notifications->publish(
+                (int) $cert->organization_id,
+                (int) ($cert->customer->users()->first()?->id ?? $reviewer->id),
+                'TAX',
+                "Withholding Certificate Review: {$decision}",
+                "Your BIR 2307 certificate {$cert->certificate_no} has been {$decision}.".($rejectionReason ? " Reason: {$rejectionReason}" : ''),
+                [
                     'certificate_id' => $cert->id,
                     'certificate_no' => $cert->certificate_no,
                     'status' => $decision,
                 ],
-                'is_read' => false,
-            ]);
+            );
 
-            broadcast(new DataRefreshEvent(
+            SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
                 $cert->organization_id,
                 'tax_evidence',
                 'withholding_certificate',
                 $cert->id,
-                strtolower($decision)
+                strtolower($decision),
+                $cert->lock_version,
+                $cert->customer->users()->first()?->id,
+                false,
             ));
 
             // Outbound Transactional SMS Notice (Decision W31 & BIR-14)
@@ -282,6 +289,17 @@ class TaxEvidenceService
                     'revoked'
                 );
             }
+
+            SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
+                $cert->organization_id,
+                'tax_evidence',
+                'withholding_certificate',
+                $cert->id,
+                'revoked',
+                $cert->lock_version,
+                $recipientUser?->id,
+                false,
+            ));
 
             return $cert;
         });
@@ -355,12 +373,15 @@ class TaxEvidenceService
                 'created_at' => Carbon::now(),
             ]);
 
-            broadcast(new DataRefreshEvent(
+            SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
                 $customer->organization_id,
                 'tax_evidence',
                 'tax_exemption',
                 $exemption->id,
-                'submitted'
+                'submitted',
+                $exemption->lock_version,
+                $actor->id,
+                false,
             ));
 
             return $exemption->load(['customer', 'privateFile.latestVersion']);
@@ -414,26 +435,28 @@ class TaxEvidenceService
                 'created_at' => $now,
             ]);
 
-            // Notify customer
-            InAppNotification::create([
-                'organization_id' => $exemption->organization_id,
-                'user_id' => $exemption->customer->users()->first()?->id ?? $reviewer->id,
-                'type' => 'TAX',
-                'title' => "Tax Exemption Review: {$decision}",
-                'body' => "Your tax exemption proof ({$exemption->legal_basis}) has been {$decision}.".($rejectionReason ? " Reason: {$rejectionReason}" : ''),
-                'data' => [
+            // Notify customer (durable + Reverb wake-up)
+            $this->notifications->publish(
+                (int) $exemption->organization_id,
+                (int) ($exemption->customer->users()->first()?->id ?? $reviewer->id),
+                'TAX',
+                "Tax Exemption Review: {$decision}",
+                "Your tax exemption proof ({$exemption->legal_basis}) has been {$decision}.".($rejectionReason ? " Reason: {$rejectionReason}" : ''),
+                [
                     'exemption_id' => $exemption->id,
                     'status' => $decision,
                 ],
-                'is_read' => false,
-            ]);
+            );
 
-            broadcast(new DataRefreshEvent(
+            SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
                 $exemption->organization_id,
                 'tax_evidence',
                 'tax_exemption',
                 $exemption->id,
-                strtolower($decision)
+                strtolower($decision),
+                $exemption->lock_version,
+                $exemption->customer->users()->first()?->id,
+                false,
             ));
 
             // Outbound Transactional SMS Notice (Decision W31 & BIR-14)
@@ -506,6 +529,17 @@ class TaxEvidenceService
                 );
             }
 
+            SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
+                $exemption->organization_id,
+                'tax_evidence',
+                'tax_exemption',
+                $exemption->id,
+                'revoked',
+                $exemption->lock_version,
+                $recipientUser?->id,
+                false,
+            ));
+
             return $exemption;
         });
     }
@@ -516,12 +550,14 @@ class TaxEvidenceService
     public function findEffectiveExemption(
         int $customerId,
         Carbon|string $date,
-        string $serviceType
+        string $serviceType,
+        ?string $exemptionType = null
     ): ?CustomerTaxExemption {
         $dateStr = $date instanceof Carbon ? $date->toDateString() : Carbon::parse($date)->toDateString();
 
         $candidates = CustomerTaxExemption::where('customer_id', $customerId)
             ->where('status', CustomerTaxExemption::STATUS_APPROVED)
+            ->when($exemptionType, fn ($query) => $query->where('exemption_type', $exemptionType))
             ->where('valid_from', '<=', $dateStr)
             ->where(function ($q) use ($dateStr) {
                 $q->whereNull('valid_to')

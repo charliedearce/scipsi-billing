@@ -87,6 +87,8 @@ class BillingCollectionsReportTest extends TestCase
         $content = $export->getContent();
         $this->assertStringStartsWith("\xEF\xBB\xBF", $content);
         $this->assertStringContainsString('Document type', $content);
+        $this->assertStringContainsString('Receipt kind', $content);
+        $this->assertStringContainsString('Counts as official receipt', $content);
         $this->assertStringContainsString("'=Unsafe payer", $content);
         $this->assertDatabaseHas('audit_events', [
             'event_type' => 'BILLING_COLLECTIONS_REPORT_EXPORTED',
@@ -133,10 +135,40 @@ class BillingCollectionsReportTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_register_includes_superseded_invoices_and_receipt_kind_columns(): void
+    {
+        $issued = $this->postedInvoice();
+        $issued->update(['status' => Invoice::STATUS_SUPERSEDED]);
+        $receipt = $this->postReceipt($this->postedInvoice(), '50.00', 'RPT-ACK-KIND-001');
+        $receipt->update([
+            'receipt_kind' => Receipt::KIND_ACKNOWLEDGEMENT,
+            'counts_as_official_receipt' => false,
+        ]);
+        $date = now('Asia/Manila')->toDateString();
+
+        $response = $this->actingAs($this->admin, 'sanctum')
+            ->getJson("/api/v1/reports/billing-collections?date_from={$date}&date_to={$date}")
+            ->assertOk();
+
+        $rows = collect($response->json('data.rows'));
+        $this->assertTrue($rows->contains(fn (array $row): bool => $row['document_number'] === $issued->invoice_number && $row['status'] === 'SUPERSEDED'));
+        $ackRow = $rows->first(fn (array $row): bool => $row['document_type'] === 'RECEIPT' && $row['document_number'] === $receipt->receipt_number);
+        $this->assertNotNull($ackRow);
+        $this->assertSame('ACKNOWLEDGEMENT', $ackRow['receipt_kind']);
+        $this->assertFalse($ackRow['counts_as_official_receipt']);
+
+        $export = $this->actingAs($this->admin, 'sanctum')
+            ->get("/api/v1/reports/billing-collections/export?date_from={$date}&date_to={$date}")
+            ->assertOk();
+        $this->assertStringContainsString('ACKNOWLEDGEMENT', $export->getContent());
+        $this->assertStringContainsString(',N,', $export->getContent());
+    }
+
     private function postedInvoice(): Invoice
     {
         $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', [
             'customer_id' => $this->customer->id,
+            ...$this->invoiceShipmentPayload(),
             'business_date' => now('Asia/Manila')->toDateString(),
             'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]],
         ])->assertCreated();

@@ -67,6 +67,17 @@ class LateChargeController extends Controller
         return response()->json(['data' => $published]);
     }
 
+    public function deletePolicy(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'expected_lock_version' => ['required', 'integer', 'min:1'],
+        ]);
+        $policy = LateChargePolicyVersion::where('organization_id', $request->user()->organization_id)->findOrFail($id);
+        $this->policies->deleteDraft($policy, $request->user(), (int) $data['expected_lock_version']);
+
+        return response()->json(['message' => 'Late-charge policy draft deleted.']);
+    }
+
     public function assessments(Request $request): JsonResponse
     {
         $paginator = $this->assessments->listAssessments($request->user(), $request->only(['status', 'customer_id', 'per_page']));

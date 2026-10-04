@@ -19,6 +19,12 @@ use Illuminate\Validation\ValidationException;
 
 class InvoiceDraftService
 {
+    public const SURCHARGE_NONE = 'NONE';
+
+    public const SURCHARGE_FUEL = 'FUEL';
+
+    public const SURCHARGE_DANGEROUS_CARGO = 'DANGEROUS_CARGO';
+
     public function __construct(
         protected DecimalCalculatorService $calculator,
         protected BuyerProfileValidationService $buyerProfileValidator,
@@ -49,19 +55,33 @@ class InvoiceDraftService
 
         $dateStr = $businessDate ?? ($data['business_date'] ?? Carbon::now('Asia/Manila')->format('Y-m-d'));
         $businessDateTime = Carbon::parse($dateStr, 'Asia/Manila');
+        $billRoute = $data['route_type'] ?? null;
+        [$surchargeMode, $dangerousCargoPercent] = $this->resolveSurchargeSelection($data);
 
         $calculatedItems = [];
         $lineNumber = 1;
 
         foreach ($data['items'] as $itemInput) {
-            $tariffVersion = $this->resolveTariffVersion($organizationId, $itemInput, $businessDateTime);
+            $tariffVersion = $this->resolveTariffVersion(
+                $organizationId,
+                $itemInput,
+                $businessDateTime,
+                is_string($billRoute) && $billRoute !== '' ? $billRoute : null
+            );
+            if (is_string($billRoute) && $billRoute !== '' && $tariffVersion->tariff->route_type !== $billRoute) {
+                throw ValidationException::withMessages([
+                    'items' => ["Tariff [{$tariffVersion->tariff->tariff_code}] is {$tariffVersion->tariff->route_type} and does not match the bill route {$billRoute}."],
+                ]);
+            }
 
-            // Fuel surcharge resolution
+            // Fuel / dangerous-cargo surcharge resolution (mutually exclusive bill modes)
             $fuelObservation = null;
             $fuelBand = null;
             $fuelSurchargePercent = null;
+            $calcFuelApplicability = 'NOT_APPLICABLE';
+            $snapshotFuelApplicability = $tariffVersion->fuel_surcharge_applicability;
 
-            if ($tariffVersion->fuel_surcharge_applicability === 'APPLICABLE') {
+            if ($surchargeMode === self::SURCHARGE_FUEL && $tariffVersion->fuel_surcharge_applicability === 'APPLICABLE') {
                 $fuelObservation = FuelPriceObservation::where('organization_id', $organizationId)
                     ->where('scope_key', 'ORGANIZATION')
                     ->where('product_grade', 'DIESEL')
@@ -109,11 +129,24 @@ class InvoiceDraftService
                 }
 
                 $fuelSurchargePercent = (string) $fuelBand->surcharge_percent;
+                $calcFuelApplicability = 'APPLICABLE';
+            } elseif ($surchargeMode === self::SURCHARGE_DANGEROUS_CARGO) {
+                // Dangerous cargo scales the tariff rate (legacy DANGER factor), not an additive fuel component.
+                $snapshotFuelApplicability = 'NOT_APPLICABLE';
             }
 
             // Calculation inputs
             $qty = (string) ($itemInput['quantity'] ?? '1');
-            $rate = (string) ($itemInput['unit_rate'] ?? $tariffVersion->rate);
+            $originalRate = (string) $tariffVersion->rate;
+            $rate = $originalRate;
+            $rateForCalculation = $originalRate;
+            if ($surchargeMode === self::SURCHARGE_FUEL && $fuelSurchargePercent !== null && bccomp($fuelSurchargePercent, '0', 4) > 0) {
+                $fuelFactor = bcadd('1', $fuelSurchargePercent, 4);
+                $rate = $this->calculator->round(bcmul($originalRate, $fuelFactor, 8), 2);
+            } elseif ($surchargeMode === self::SURCHARGE_DANGEROUS_CARGO && $dangerousCargoPercent !== null) {
+                $rateForCalculation = bcmul($originalRate, $dangerousCargoPercent, 8);
+                $rate = $this->calculator->round($rateForCalculation, 2);
+            }
             // Effective tax treatment resolution: Check customer tax exemptions (Decision W20 / P2-08)
             $taxTreatment = $tariffVersion->tax_treatment_key;
             $taxService = $this->taxEvidenceService ?? app(TaxEvidenceService::class);
@@ -137,17 +170,21 @@ class InvoiceDraftService
 
             $ppaApplicability = $tariffVersion->ppa_share_applicability;
             $ppaRate = (string) $tariffVersion->ppa_share_rate;
-            $discountAmount = (string) ($itemInput['discount_amount'] ?? '0.00');
+            $calculatedPpaApplicability = $surchargeMode === self::SURCHARGE_FUEL
+                ? 'NOT_APPLICABLE'
+                : $ppaApplicability;
+            $discountAmount = '0.00';
 
             $calc = $this->calculator->calculateItem(
                 quantity: $qty,
-                rate: $rate,
+                rate: $rateForCalculation,
                 taxTreatmentKey: $taxTreatment,
-                ppaShareApplicability: $ppaApplicability,
+                ppaShareApplicability: $calculatedPpaApplicability,
                 ppaShareRate: $ppaRate,
-                fuelSurchargeApplicability: $tariffVersion->fuel_surcharge_applicability,
+                fuelSurchargeApplicability: $calcFuelApplicability,
                 fuelSurchargePercent: $fuelSurchargePercent,
-                discountAmount: $discountAmount
+                discountAmount: $discountAmount,
+                roundBaseGrossToCents: $surchargeMode === self::SURCHARGE_DANGEROUS_CARGO
             );
 
             $calculatedItems[] = [
@@ -172,15 +209,33 @@ class InvoiceDraftService
                     'tax_treatment_key' => $taxTreatment,
                     'ppa_share_applicability' => $ppaApplicability,
                     'ppa_share_rate' => $ppaRate,
-                    'fuel_surcharge_applicability' => $tariffVersion->fuel_surcharge_applicability,
+                    'fuel_surcharge_applicability' => $snapshotFuelApplicability,
                     'fuel_price_observation_id' => $fuelObservation?->id,
                     'fuel_price' => $fuelObservation?->price,
                     'fuel_band_id' => $fuelBand?->id,
-                    'fuel_surcharge_percent' => $fuelSurchargePercent,
+                    'fuel_surcharge_percent' => $surchargeMode === self::SURCHARGE_FUEL ? $fuelSurchargePercent : null,
                     'calculation_payload' => [
                         'input_quantity' => $qty,
-                        'input_rate' => $rate,
+                        'input_rate' => $originalRate,
+                        'effective_unit_rate' => $rate,
+                        'unrounded_effective_unit_rate' => $surchargeMode === self::SURCHARGE_DANGEROUS_CARGO
+                            ? $rateForCalculation
+                            : null,
+                        'dangerous_gross_rounding' => $surchargeMode === self::SURCHARGE_DANGEROUS_CARGO
+                            ? 'CENTAVO_HALF_AWAY_FROM_ZERO'
+                            : null,
+                        'ppa_suppressed_by_fuel' => $surchargeMode === self::SURCHARGE_FUEL,
                         'discount_amount' => $discountAmount,
+                        'surcharge_mode' => $surchargeMode,
+                        'dangerous_cargo_percent' => $surchargeMode === self::SURCHARGE_DANGEROUS_CARGO
+                            ? $dangerousCargoPercent
+                            : null,
+                        'surcharge_percent_applied' => $surchargeMode === self::SURCHARGE_FUEL
+                            ? $fuelSurchargePercent
+                            : null,
+                        'fuel_gross_rounding' => $surchargeMode === self::SURCHARGE_FUEL && $fuelSurchargePercent !== null && bccomp($fuelSurchargePercent, '0', 4) > 0
+                            ? 'WHOLE_PESO_HALF_AWAY_FROM_ZERO'
+                            : null,
                         'calculated_at' => Carbon::now('Asia/Manila')->toIso8601String(),
                     ],
                 ],
@@ -194,6 +249,8 @@ class InvoiceDraftService
             'buyer_profile_version_id' => $buyerProfileVersion->id,
             'business_date' => $dateStr,
             'currency' => 'PHP',
+            'surcharge_mode' => $surchargeMode,
+            'dangerous_cargo_percent' => $dangerousCargoPercent,
             'is_fiscal_ready' => $buyerValidation['is_fiscal_ready'],
             'fiscal_readiness_errors' => $buyerValidation['missing_fiscal_fields'],
             'items' => $calculatedItems,
@@ -208,7 +265,9 @@ class InvoiceDraftService
     {
         $calcResult = $this->calculateDraft($organizationId, $data);
 
-        return DB::transaction(function () use ($organizationId, $locationId, $actor, $data, $calcResult) {
+        $shipment = InvoiceShipment::resolve($organizationId, $data);
+
+        return DB::transaction(function () use ($organizationId, $locationId, $actor, $data, $calcResult, $shipment) {
             $invoice = Invoice::create([
                 'organization_id' => $organizationId,
                 'location_id' => $locationId,
@@ -218,6 +277,7 @@ class InvoiceDraftService
                 'status' => 'DRAFT',
                 'business_date' => $calcResult['business_date'],
                 'currency' => $calcResult['currency'],
+                ...$shipment,
                 'base_gross_amount' => $calcResult['totals']['base_gross_amount'],
                 'fuel_surcharge_amount' => $calcResult['totals']['fuel_surcharge_amount'],
                 'gross_amount' => $calcResult['totals']['gross_amount'],
@@ -228,7 +288,8 @@ class InvoiceDraftService
                 'total_charge_amount' => $calcResult['totals']['total_charge_amount'],
                 'is_fiscal_ready' => $calcResult['is_fiscal_ready'],
                 'fiscal_readiness_errors' => $calcResult['fiscal_readiness_errors'],
-                'notes' => $data['notes'] ?? null,
+                'surcharge_mode' => $calcResult['surcharge_mode'],
+                'dangerous_cargo_percent' => $calcResult['dangerous_cargo_percent'],
                 'lock_version' => 1,
                 'created_by_user_id' => $actor->id,
             ]);
@@ -237,6 +298,7 @@ class InvoiceDraftService
                 $item = InvoiceItem::create([
                     'invoice_id' => $invoice->id,
                     'line_number' => $itemData['line_number'],
+                    'cargo_code' => $itemData['snapshot']['tariff_code'],
                     'tariff_version_id' => $itemData['tariff_version_id'],
                     'description' => $itemData['description'],
                     'quantity' => $itemData['quantity'],
@@ -301,13 +363,41 @@ class InvoiceDraftService
             throw new ConcurrencyException("Invoice edit conflict: current version is {$invoice->lock_version}, expected {$expectedVersion}.");
         }
 
+        $shipment = InvoiceShipment::resolve($invoice->organization_id, array_merge([
+            'vessel_id' => $invoice->vessel_id,
+            'voyage' => $invoice->voyage,
+            'notes' => $invoice->notes,
+            'movement_type' => $invoice->movement_type,
+            'route_type' => $invoice->route_type,
+        ], $data));
+
         $calcResult = $this->calculateDraft(
             organizationId: $invoice->organization_id,
-            data: array_merge(['customer_id' => $invoice->customer_id], $data),
+            data: array_merge([
+                'customer_id' => $invoice->customer_id,
+                'route_type' => $shipment['route_type'],
+                'surcharge_mode' => $data['surcharge_mode'] ?? $invoice->surcharge_mode ?? self::SURCHARGE_FUEL,
+                'dangerous_cargo_percent' => array_key_exists('dangerous_cargo_percent', $data)
+                    ? $data['dangerous_cargo_percent']
+                    : $invoice->dangerous_cargo_percent,
+            ], $data),
             businessDate: $data['business_date'] ?? $invoice->business_date->format('Y-m-d')
         );
 
-        return DB::transaction(function () use ($invoice, $actor, $data, $expectedVersion, $reason, $calcResult) {
+        return DB::transaction(function () use ($invoice, $actor, $expectedVersion, $reason, $calcResult, $shipment) {
+            // Queue/walk-in drafts historically skipped the initial revision, leaving
+            // document_revisions behind invoice.lock_version. Align before recording the update.
+            $this->revisionService->alignLockVersion(
+                organizationId: $invoice->organization_id,
+                locationId: $invoice->location_id,
+                documentType: 'INVOICE',
+                documentId: $invoice->id,
+                actor: $actor,
+                snapshot: $invoice->load(['items.pricingSnapshot', 'customer', 'buyerProfileVersion'])->toArray(),
+                targetLockVersion: $expectedVersion,
+                reason: 'Align invoice draft revision before update'
+            );
+
             // Delete old items and cascading pricing snapshots
             $invoice->items()->delete();
 
@@ -325,7 +415,9 @@ class InvoiceDraftService
                 'total_charge_amount' => $calcResult['totals']['total_charge_amount'],
                 'is_fiscal_ready' => $calcResult['is_fiscal_ready'],
                 'fiscal_readiness_errors' => $calcResult['fiscal_readiness_errors'],
-                'notes' => $data['notes'] ?? $invoice->notes,
+                'surcharge_mode' => $calcResult['surcharge_mode'],
+                'dangerous_cargo_percent' => $calcResult['dangerous_cargo_percent'],
+                ...$shipment,
                 'lock_version' => $newVersion,
                 'updated_by_user_id' => $actor->id,
             ]);
@@ -334,6 +426,7 @@ class InvoiceDraftService
                 $item = InvoiceItem::create([
                     'invoice_id' => $invoice->id,
                     'line_number' => $itemData['line_number'],
+                    'cargo_code' => $itemData['snapshot']['tariff_code'],
                     'tariff_version_id' => $itemData['tariff_version_id'],
                     'description' => $itemData['description'],
                     'quantity' => $itemData['quantity'],
@@ -386,8 +479,12 @@ class InvoiceDraftService
     /**
      * Resolve the active tariff version for given item input and business date.
      */
-    protected function resolveTariffVersion(int $organizationId, array $itemInput, Carbon $businessDateTime): TariffVersion
-    {
+    protected function resolveTariffVersion(
+        int $organizationId,
+        array $itemInput,
+        Carbon $businessDateTime,
+        ?string $billRoute = null
+    ): TariffVersion {
         if (! empty($itemInput['tariff_version_id'])) {
             $version = TariffVersion::with('tariff')->findOrFail($itemInput['tariff_version_id']);
             if ($version->tariff->organization_id !== $organizationId) {
@@ -399,19 +496,35 @@ class InvoiceDraftService
             return $version;
         }
 
+        $query = Tariff::where('organization_id', $organizationId)->where('is_active', true);
+
         if (! empty($itemInput['tariff_code'])) {
-            $tariff = Tariff::where('organization_id', $organizationId)
-                ->where('tariff_code', $itemInput['tariff_code'])
-                ->where('is_active', true)
-                ->firstOrFail();
+            $query->where('tariff_code', $itemInput['tariff_code']);
         } elseif (! empty($itemInput['tariff_id'])) {
-            $tariff = Tariff::where('organization_id', $organizationId)
-                ->where('id', $itemInput['tariff_id'])
-                ->where('is_active', true)
-                ->firstOrFail();
+            $query->where('id', $itemInput['tariff_id']);
         } else {
             throw ValidationException::withMessages([
                 'items' => ['Each item must specify tariff_version_id, tariff_code, or tariff_id.'],
+            ]);
+        }
+
+        if ($billRoute) {
+            $query->where('route_type', $billRoute);
+        }
+        if (! empty($itemInput['service_type'])) {
+            $query->where('service_type', $itemInput['service_type']);
+        }
+
+        $matches = $query->get();
+        if ($matches->count() > 1) {
+            throw ValidationException::withMessages([
+                'items' => ['Tariff matches more than one service rate. Select arrastre, stevedoring or other.'],
+            ]);
+        }
+        $tariff = $matches->first();
+        if (! $tariff) {
+            throw ValidationException::withMessages([
+                'tariff' => ['No active tariff matches the selected code, service and route.'],
             ]);
         }
 
@@ -433,5 +546,54 @@ class InvoiceDraftService
         $version->setRelation('tariff', $tariff);
 
         return $version;
+    }
+
+    /**
+     * Resolve mutually exclusive bill surcharge mode.
+     * Default FUEL preserves W29 auto-apply when the field is omitted.
+     *
+     * @return array{0: string, 1: string|null}
+     */
+    protected function resolveSurchargeSelection(array $data): array
+    {
+        $mode = strtoupper(trim((string) ($data['surcharge_mode'] ?? self::SURCHARGE_FUEL)));
+        if (! in_array($mode, [self::SURCHARGE_NONE, self::SURCHARGE_FUEL, self::SURCHARGE_DANGEROUS_CARGO], true)) {
+            throw ValidationException::withMessages([
+                'surcharge_mode' => ['Surcharge mode must be NONE, FUEL, or DANGEROUS_CARGO.'],
+            ]);
+        }
+
+        $percent = null;
+        if ($mode === self::SURCHARGE_DANGEROUS_CARGO) {
+            if (! array_key_exists('dangerous_cargo_percent', $data) || $data['dangerous_cargo_percent'] === null || $data['dangerous_cargo_percent'] === '') {
+                throw ValidationException::withMessages([
+                    'dangerous_cargo_percent' => ['Enter a dangerous cargo percentage when Dangerous cargo is enabled.'],
+                ]);
+            }
+
+            $raw = (string) $data['dangerous_cargo_percent'];
+            if (! is_numeric($raw)) {
+                throw ValidationException::withMessages([
+                    'dangerous_cargo_percent' => ['Dangerous cargo percentage must be numeric.'],
+                ]);
+            }
+
+            // UI sends a rate factor (1.5000 = 150% of tariff). Also accept human percent
+            // points above the max factor of 10 (e.g. 150 → 1.5000). Values ≤ 10 stay factors.
+            if (bccomp($raw, '10', 4) > 0) {
+                $percent = $this->calculator->truncate(bcdiv($raw, '100', 6), 4);
+            } else {
+                $percent = $this->calculator->truncate($raw, 4);
+            }
+
+            // Allow up to 1000% of tariff rate (factor 10.0000); must be > 0.
+            if (bccomp($percent, '0', 4) <= 0 || bccomp($percent, '10', 4) > 0) {
+                throw ValidationException::withMessages([
+                    'dangerous_cargo_percent' => ['Dangerous cargo percentage must be greater than 0 and at most 1000% of the tariff rate.'],
+                ]);
+            }
+        }
+
+        return [$mode, $percent];
     }
 }

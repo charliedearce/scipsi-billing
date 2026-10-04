@@ -185,6 +185,8 @@ class TransmittalService
         return Receipt::query()
             ->where('organization_id', $actor->organization_id)
             ->where('status', 'POSTED')
+            // White receipt transmittals capture Official Receipt / collection-receipt facts only.
+            ->officialFiscal()
             ->whereDate('business_date', '<=', $asOf)
             ->when($locationId !== null, function (Builder $query) use ($locationId): void {
                 // P3 receipts created before their own location is captured still have one or more

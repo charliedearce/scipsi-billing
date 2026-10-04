@@ -95,6 +95,91 @@ class DocumentRevisionService
     }
 
     /**
+     * Advance document_revisions.lock_version up to the invoice/document lock version.
+     * Repairs drafts that were created without an initial revision (revision stayed at 1
+     * while invoice.lock_version moved ahead on the first update).
+     */
+    public function alignLockVersion(
+        int $organizationId,
+        ?int $locationId,
+        string $documentType,
+        int $documentId,
+        User $actor,
+        array $snapshot,
+        int $targetLockVersion,
+        ?string $reason = null
+    ): void {
+        if ($targetLockVersion < 1) {
+            throw new ConcurrencyException("Invalid target lock version {$targetLockVersion}.");
+        }
+
+        DB::transaction(function () use (
+            $organizationId,
+            $locationId,
+            $documentType,
+            $documentId,
+            $actor,
+            $snapshot,
+            $targetLockVersion,
+            $reason
+        ) {
+            $latest = DocumentRevision::where('organization_id', $organizationId)
+                ->where('document_type', $documentType)
+                ->where('document_id', $documentId)
+                ->orderBy('revision_number', 'desc')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $latest) {
+                $this->createRevision(
+                    organizationId: $organizationId,
+                    locationId: $locationId,
+                    documentType: $documentType,
+                    documentId: $documentId,
+                    actor: $actor,
+                    newSnapshot: $snapshot,
+                    reason: $reason ?? 'Backfill initial document revision',
+                    expectedVersion: 1
+                );
+
+                $latest = DocumentRevision::where('organization_id', $organizationId)
+                    ->where('document_type', $documentType)
+                    ->where('document_id', $documentId)
+                    ->orderBy('revision_number', 'desc')
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            while ($latest && $latest->lock_version < $targetLockVersion) {
+                $this->createRevision(
+                    organizationId: $organizationId,
+                    locationId: $locationId,
+                    documentType: $documentType,
+                    documentId: $documentId,
+                    actor: $actor,
+                    newSnapshot: $snapshot,
+                    reason: $reason ?? 'Align document revision with document lock version',
+                    expectedVersion: $latest->lock_version
+                );
+
+                $latest = DocumentRevision::where('organization_id', $organizationId)
+                    ->where('document_type', $documentType)
+                    ->where('document_id', $documentId)
+                    ->orderBy('revision_number', 'desc')
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            if (! $latest || $latest->lock_version !== $targetLockVersion) {
+                $current = $latest?->lock_version ?? 'none';
+                throw new ConcurrencyException(
+                    "Document edit conflict: current version is {$current}, expected {$targetLockVersion}."
+                );
+            }
+        });
+    }
+
+    /**
      * Compare two revisions and return structured field-level diff.
      */
     public function compareRevisions(int $revisionAId, int $revisionBId): array

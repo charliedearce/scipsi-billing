@@ -26,6 +26,12 @@ Applies to `online-billing/`. This project targets Vue 3 + TypeScript, Laravel A
 - Treat [DOCUMENT_HISTORY.md](docs/discovery/DOCUMENT_HISTORY.md) as a cross-module contract: draft edits create attributable revisions, issued financial facts are immutable, corrections/reversals are linked actions, and audit/history records are append-only, scoped, redacted and retention-protected. Do not add a direct update/delete path for posted invoices, receipts, allocations or their artifacts.
 - Keep credentials, customer exports, and sensitive test artifacts out of commits and handoff notes.
 
+## Frontend UI and UX
+
+- For every UI/UX or frontend visual change under `apps/web`, read and apply [.agents/skills/art-design-pro-ui/SKILL.md](.agents/skills/art-design-pro-ui/SKILL.md) before editing, even when the user does not explicitly name the skill.
+- Keep new and changed surfaces native to Art Design Pro. Reuse project components, theme/gray tokens, icon conventions, density, responsive patterns, box modes, and light/dark behavior; do not introduce a parallel generic dashboard or standalone visual language.
+- Source inspection and a successful TypeScript/Vite build are automated verification, not rendered acceptance. When visual acceptance matters, report authenticated browser and responsive checks separately.
+
 ## Finish every implementation session
 
 Update docs/PROGRESS.md with exact task IDs, changed paths, checks and outcomes, unresolved questions, and a concrete next step. Record the tested commit or identify the uncommitted files tested. Never claim a commit/push/deployment that did not occur.

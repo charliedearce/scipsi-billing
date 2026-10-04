@@ -55,8 +55,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      reverb:
+        condition: service_started
     ports:
       - "127.0.0.1:18000:8000"
+    volumes:
+      - api_private_storage:/var/www/html/storage/app/private
   worker:
     profiles: ["app"]
     build:
@@ -81,7 +85,31 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - api_private_storage:/var/www/html/storage/app/private
     command: ["php", "artisan", "queue:work", "redis", "--queue=default", "--sleep=1", "--tries=1", "--timeout=120"]
+  legacy-importer:
+    profiles: ["app"]
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/api/.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: online_billing_dev
+      DB_USERNAME: online_billing_dev
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - api_private_storage:/var/www/html/storage/app/private
+    command: ["php", "artisan", "queue:work", "legacy_import", "--queue=legacy-imports", "--sleep=2", "--tries=1", "--timeout=1800"]
   scheduler:
     profiles: ["app"]
     build:
@@ -106,6 +134,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - api_private_storage:/var/www/html/storage/app/private
     command: ["php", "artisan", "schedule:work"]
   reverb:
     profiles: ["app"]
@@ -132,6 +162,8 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:58080:8080"
+    volumes:
+      - api_private_storage:/var/www/html/storage/app/private
     command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
 secrets:
   postgres_password:
@@ -139,3 +171,4 @@ secrets:
 volumes:
   postgres_data:
   redis_data:
+  api_private_storage:

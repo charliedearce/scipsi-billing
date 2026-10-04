@@ -155,15 +155,24 @@ Public Class frmBilling
 
         Dim result As Integer = MessageBox.Show("You want to Print this transaction?", "Caution!", MessageBoxButtons.YesNo)
         If result = DialogResult.Yes Then
-            If txtLessppa.Text <> "0.00" Then
-                frmPrintBill.Show()
-                btnUpdate.Visible = False
-                btnEdit.Visible = False
-            Else
-                ServicePrintTemplateService.PrintBill(txtBillno.Text, Me)
-                btnUpdate.Visible = False
-                btnEdit.Visible = False
-            End If
+            Try
+                If ServicePrintTemplateService.IsNsclBill(txtBillno.Text) Then
+                    ServicePrintTemplateService.PrintBill(txtBillno.Text, Me)
+                    btnUpdate.Visible = False
+                    btnEdit.Visible = False
+                ElseIf txtLessppa.Text <> "0.00" Then
+                    frmPrintBill.Show()
+                    btnUpdate.Visible = False
+                    btnEdit.Visible = False
+                Else
+                    ServicePrintTemplateService.PrintBill(txtBillno.Text, Me)
+                    btnUpdate.Visible = False
+                    btnEdit.Visible = False
+                End If
+            Catch ex As Exception
+                MessageBox.Show(Me, "Unable to determine the invoice print layout." & Environment.NewLine & ex.Message,
+                                "Print Bill", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
         End If
     End Sub
 

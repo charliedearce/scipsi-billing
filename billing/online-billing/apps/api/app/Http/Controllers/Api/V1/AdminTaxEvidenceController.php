@@ -21,6 +21,9 @@ class AdminTaxEvidenceController extends Controller
      */
     public function listWithholding(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'business_date' => 'sometimes|date_format:Y-m-d',
+        ]);
         /** @var User $user */
         $user = $request->user();
 
@@ -34,6 +37,11 @@ class AdminTaxEvidenceController extends Controller
 
         if ($customerId = $request->query('customer_id')) {
             $query->where('customer_id', $customerId);
+        }
+
+        if (isset($validated['business_date'])) {
+            $query->whereDate('period_from', '<=', $validated['business_date'])
+                ->whereDate('period_to', '>=', $validated['business_date']);
         }
 
         return response()->json($query->paginate(20));
@@ -98,6 +106,10 @@ class AdminTaxEvidenceController extends Controller
      */
     public function listExemptions(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'business_date' => 'sometimes|date_format:Y-m-d',
+            'exemption_type' => 'sometimes|in:VAT_EXEMPT,ZERO_RATED',
+        ]);
         /** @var User $user */
         $user = $request->user();
 
@@ -111,6 +123,18 @@ class AdminTaxEvidenceController extends Controller
 
         if ($customerId = $request->query('customer_id')) {
             $query->where('customer_id', $customerId);
+        }
+
+        if (isset($validated['exemption_type'])) {
+            $query->where('exemption_type', $validated['exemption_type']);
+        }
+
+        if (isset($validated['business_date'])) {
+            $query->whereDate('valid_from', '<=', $validated['business_date'])
+                ->where(function ($builder) use ($validated) {
+                    $builder->whereNull('valid_to')
+                        ->orWhereDate('valid_to', '>=', $validated['business_date']);
+                });
         }
 
         return response()->json($query->paginate(20));

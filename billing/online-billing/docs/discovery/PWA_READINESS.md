@@ -15,6 +15,8 @@ The first PWA scope is:
 
 PWA installation does not grant a browser notification permission. In-app announcements use the ordinary authenticated API/Reverb path while the application is open. A later Web Push feature needs a separately approved consent, subscription, VAPID/key, audience, payload-minimization, revocation, delivery-status and DPO/security design; it cannot be inferred from W33 or W34.
 
+2026-09-29 notification clarification: the user selected a native browser popup **while the site is open**. Chat and existing work notifications may request Notifications API permission only from an explicit user action, show generic text, and use the existing authorized Reverb/API notification streams. Work alerts include PPA user; chat authorization remains restricted. This is a foreground browser alert and does not add a push subscription, VAPID keys, service-worker push event, or delivery after the site closes.
+
 ## 2. Cache and offline contract
 
 | Resource/category | v1 service-worker policy | Reason |

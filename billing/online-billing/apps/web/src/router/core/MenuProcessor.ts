@@ -199,12 +199,16 @@ export class MenuProcessor {
       if (!route.children?.length) return
 
       const parentName = String(route.name || route.path || '未知路由')
+      // 目录菜单声明保留子级绝对路径时，分组只改变菜单结构，不改变既有地址
+      const keepsChildPaths = route.meta?.absoluteChildPaths === true
 
       route.children.forEach((child) => {
         const childPath = child.path || ''
 
         // 跳过合法的绝对路径：外部链接和 iframe 路由
         if (this.isValidAbsolutePath(childPath)) return
+
+        if (keepsChildPaths) return
 
         // 检测非法的绝对路径
         if (childPath.startsWith('/')) {

@@ -86,6 +86,7 @@ class FiscalInvoiceContractTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'STEV_DOM', 'quantity' => 10],
                 ],
@@ -126,6 +127,7 @@ class FiscalInvoiceContractTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'STEV_DOM', 'quantity' => 10],
                 ],
@@ -167,6 +169,7 @@ class FiscalInvoiceContractTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 25],
                 ],
@@ -205,6 +208,7 @@ class FiscalInvoiceContractTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'STEV_DOM', 'quantity' => 5],
                 ],
@@ -244,6 +248,7 @@ class FiscalInvoiceContractTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'STEV_DOM', 'quantity' => 10],
                 ],

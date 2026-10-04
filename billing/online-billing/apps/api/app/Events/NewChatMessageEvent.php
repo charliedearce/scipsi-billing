@@ -54,6 +54,9 @@ class NewChatMessageEvent implements ShouldBroadcastNow
      */
     public function broadcastWith(): array
     {
+        // Ensure sender name is available for broadcast payloads
+        $this->message->loadMissing('sender:id,name,email');
+
         return [
             'id' => $this->message->id,
             'conversation_id' => $this->message->conversation_id,

@@ -19,18 +19,40 @@ class TellerClaimReviewController extends Controller
     ) {}
 
     /**
-     * List claims in PENDING_TELLER_REVIEW status for the teller's organization.
+     * List bill claims for the teller's organization.
+     * Default: PENDING_TELLER_REVIEW. Pass status=APPROVED|REJECTED|ALL for history.
      * GET /api/v1/teller/bill-claims
      */
     public function index(Request $request): JsonResponse
     {
         $orgId = $request->user()->organization_id;
+        $status = strtoupper((string) $request->query('status', BillClaimRequest::STATUS_PENDING_TELLER_REVIEW));
 
-        $claims = BillClaimRequest::where('organization_id', $orgId)
-            ->where('claim_status', BillClaimRequest::STATUS_PENDING_TELLER_REVIEW)
-            ->with(['user', 'customer', 'events'])
-            ->orderBy('created_at', 'asc')
-            ->paginate(25)
+        $query = BillClaimRequest::where('organization_id', $orgId)
+            ->with(['user', 'customer', 'invoice:id,invoice_number,status,total_charge_amount,walk_in_customer_id', 'events']);
+
+        if ($status === 'ALL') {
+            $query->orderByDesc('created_at');
+        } elseif ($status === BillClaimRequest::STATUS_APPROVED) {
+            // Verified history: awaiting customer accept + fully accepted.
+            $query->whereIn('claim_status', [
+                BillClaimRequest::STATUS_APPROVED,
+                BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE,
+            ])->orderByDesc('created_at');
+        } elseif ($status === BillClaimRequest::STATUS_REJECTED
+            || $status === BillClaimRequest::STATUS_PENDING_TELLER_REVIEW
+            || $status === BillClaimRequest::STATUS_PENDING_VERIFICATION
+            || $status === BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE
+            || $status === BillClaimRequest::STATUS_CANCELLED
+            || $status === BillClaimRequest::STATUS_EXPIRED) {
+            $query->where('claim_status', $status)
+                ->orderByDesc('created_at');
+        } else {
+            $query->where('claim_status', BillClaimRequest::STATUS_PENDING_TELLER_REVIEW)
+                ->orderBy('created_at', 'asc');
+        }
+
+        $claims = $query->paginate(25)
             ->through(fn ($c) => $c->makeHidden(['code_hash', 'code_salt']));
 
         return response()->json($claims);
@@ -73,7 +95,7 @@ class TellerClaimReviewController extends Controller
         );
 
         $message = $validated['decision'] === 'APPROVE'
-            ? 'Claim approved and invoice linked to customer account.'
+            ? 'Identity verified. Customer must still accept the invoice preview before it appears on My Bills.'
             : 'Claim rejected.';
 
         return response()->json([

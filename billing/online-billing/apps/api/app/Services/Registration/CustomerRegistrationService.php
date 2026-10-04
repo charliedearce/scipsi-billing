@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\CustomerBuyerProfile;
 use App\Models\CustomerContactPoint;
 use App\Models\CustomerUserLink;
+use App\Models\Location;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\User;
@@ -113,6 +114,8 @@ class CustomerRegistrationService
                     $existingUser->customers()->where('status', 'pending')->update(['status' => 'active']);
                 }
 
+                $this->assignSoleOrganizationLocation($existingUser, (int) $orgId);
+
                 $challenge = $requiresOtp
                     ? $this->otpService->createMobileChallenge(
                         $mobileContact,
@@ -150,6 +153,8 @@ class CustomerRegistrationService
             if ($customerRole) {
                 $user->roles()->attach($customerRole);
             }
+
+            $this->assignSoleOrganizationLocation($user, (int) $orgId);
 
             // 2. Create Customer Business Account
             $accountNumber = 'CUST-'.date('Y').'-'.strtoupper(bin2hex(random_bytes(4)));
@@ -301,6 +306,8 @@ class CustomerRegistrationService
                         $customer->update(['status' => 'active']);
                     }
                 }
+
+                $this->assignSoleOrganizationLocation($user, (int) $user->organization_id);
             });
 
             // Issue Sanctum token for immediate sign-in
@@ -320,5 +327,30 @@ class CustomerRegistrationService
         }
 
         return $result;
+    }
+
+    /**
+     * Single-branch organizations assign their only active location as the
+     * portal user's primary membership. Multi-branch orgs leave assignment to Admin.
+     */
+    protected function assignSoleOrganizationLocation(User $user, int $organizationId): void
+    {
+        if ($user->locations()->exists()) {
+            return;
+        }
+
+        $orgLocations = Location::query()
+            ->where('organization_id', $organizationId)
+            ->where('is_active', true)
+            ->orderBy('id')
+            ->get();
+
+        if ($orgLocations->count() !== 1) {
+            return;
+        }
+
+        $user->locations()->syncWithoutDetaching([
+            $orgLocations->first()->id => ['is_primary' => true],
+        ]);
     }
 }

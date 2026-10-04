@@ -83,6 +83,29 @@ class LateChargePolicyService
         });
     }
 
+    public function deleteDraft(LateChargePolicyVersion $policy, User $actor, int $expectedVersion): void
+    {
+        DB::transaction(function () use ($policy, $actor, $expectedVersion): void {
+            $locked = LateChargePolicyVersion::where('organization_id', $actor->organization_id)
+                ->whereKey($policy->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            if ($locked->status !== LateChargePolicyVersion::STATUS_DRAFT) {
+                throw ValidationException::withMessages(['policy' => ['Only a draft late-charge policy can be deleted.']]);
+            }
+            if ($locked->lock_version !== $expectedVersion) {
+                throw new ConcurrencyException('Late-charge policy changed since it was loaded. Refresh before deleting.');
+            }
+            if ($locked->assessments()->exists()) {
+                throw ValidationException::withMessages(['policy' => ['This late-charge policy is referenced by an assessment and cannot be deleted.']]);
+            }
+
+            $this->audit($locked, $actor, 'LATE_CHARGE_POLICY_DRAFT_DELETED', 'credit_late_charge_policies:manage', 'Late-charge policy draft deleted.');
+            $locked->bands()->delete();
+            $locked->delete();
+        });
+    }
+
     public function publish(LateChargePolicyVersion $policy, User $actor, int $expectedVersion, string $reason): LateChargePolicyVersion
     {
         return DB::transaction(function () use ($policy, $actor, $expectedVersion, $reason): LateChargePolicyVersion {
@@ -97,6 +120,7 @@ class LateChargePolicyService
             if ($locked->bands()->count() < 1) {
                 throw ValidationException::withMessages(['bands' => ['A late-charge policy requires at least one day band before publication.']]);
             }
+            $this->preparePublishedLateChargePolicyWindow($locked);
             $this->assertNoPublishedOverlap($locked);
 
             $locked->update([
@@ -220,6 +244,58 @@ class LateChargePolicyService
                 throw ValidationException::withMessages(['bands' => ['Only the final late-charge band may have an open upper bound.']]);
             }
         }
+    }
+
+    protected function preparePublishedLateChargePolicyWindow(LateChargePolicyVersion $candidate): void
+    {
+        $cutover = Carbon::now(self::TIMEZONE);
+        if ($candidate->effective_from) {
+            $from = $candidate->effective_from->copy()->timezone(self::TIMEZONE);
+            if ($from->greaterThan($cutover)) {
+                $cutover = $from;
+            }
+        }
+
+        $safety = 0;
+        while ($safety < 10) {
+            $safety++;
+            $openEnded = LateChargePolicyVersion::where('organization_id', $candidate->organization_id)
+                ->where('status', LateChargePolicyVersion::STATUS_PUBLISHED)
+                ->where('currency', $candidate->currency)
+                ->whereNull('effective_to')
+                ->whereKeyNot($candidate->id)
+                ->orderBy('effective_from')
+                ->lockForUpdate()
+                ->get();
+
+            if ($openEnded->isEmpty()) {
+                break;
+            }
+
+            $closedAny = false;
+            foreach ($openEnded as $policy) {
+                $policyStart = $policy->effective_from->copy()->timezone(self::TIMEZONE);
+                if ($policyStart->lessThan($cutover)) {
+                    $policy->forceFill([
+                        'effective_to' => $cutover,
+                        'lock_version' => $policy->lock_version + 1,
+                    ])->save();
+                    $closedAny = true;
+                }
+            }
+
+            if ($closedAny) {
+                continue;
+            }
+
+            $latestStart = $openEnded
+                ->map(fn (LateChargePolicyVersion $policy) => $policy->effective_from->copy()->timezone(self::TIMEZONE)->getTimestamp())
+                ->max();
+            $cutover = Carbon::createFromTimestamp((int) $latestStart, self::TIMEZONE)->addSecond();
+        }
+
+        $candidate->forceFill(['effective_from' => $cutover])->save();
+        $candidate->refresh();
     }
 
     protected function assertNoPublishedOverlap(LateChargePolicyVersion $candidate): void

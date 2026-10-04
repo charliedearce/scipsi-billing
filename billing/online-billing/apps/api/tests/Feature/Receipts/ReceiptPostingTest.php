@@ -45,6 +45,56 @@ class ReceiptPostingTest extends TestCase
         BuyerProfileVersion::create(['buyer_profile_id' => $profile->id, 'version' => 1, 'registered_name' => 'Receipt Test Customer, Inc.', 'tin' => '111-222-333-000', 'branch_code' => '00000', 'tax_classification' => 'REGULAR', 'billing_address' => ['street' => 'Makar Wharf', 'city' => 'General Santos City', 'province' => 'South Cotabato'], 'contact_email' => 'receipts@example.test', 'contact_phone' => '+639171111111', 'effective_from' => now()->subDay(), 'status' => 'active']);
     }
 
+    public function test_posts_acknowledgement_receipt_on_separate_series_without_fiscal_or_flag(): void
+    {
+        $invoice = $this->postedInvoice();
+        $body = $this->receiptPayload($invoice->id, $invoice->total_charge_amount, 'ACK-001');
+        $body['receipt_kind'] = 'ACKNOWLEDGEMENT';
+
+        $response = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/receipts', $body);
+        $response->assertOk()
+            ->assertJsonPath('data.status', 'POSTED')
+            ->assertJsonPath('data.receipt_kind', 'ACKNOWLEDGEMENT')
+            ->assertJsonPath('data.counts_as_official_receipt', false)
+            ->assertJsonPath('data.receipt_number', 'ACK-0000000001');
+
+        $receipt = Receipt::firstOrFail();
+        $this->assertSame((string) $invoice->total_charge_amount, $receipt->applied_amount);
+        $this->assertSame('ACKNOWLEDGEMENT', $receipt->receipt_kind);
+        $this->assertFalse($receipt->counts_as_official_receipt);
+        $this->assertFalse($receipt->isOfficialReceipt());
+        $this->assertDatabaseHas('document_numbers', [
+            'document_type' => 'ACKNOWLEDGEMENT_RECEIPT',
+            'formatted_number' => 'ACK-0000000001',
+            'document_id' => $receipt->id,
+        ]);
+        $this->assertSame(0, Receipt::query()->officialFiscal()->count());
+        $this->assertDatabaseHas('document_snapshots', [
+            'document_type' => 'RECEIPT',
+            'document_id' => $receipt->id,
+            'document_kind' => 'ACKNOWLEDGEMENT_RECEIPT',
+        ]);
+        $artifact = DocumentArtifact::where('document_type', 'RECEIPT')->where('document_id', $receipt->id)->firstOrFail();
+        $this->assertSame('RENDERED', $artifact->status);
+        $this->assertTrue(Storage::disk('private')->exists($artifact->file_path));
+    }
+
+    public function test_default_receipt_kind_remains_official_and_counts_for_fiscal_or_scope(): void
+    {
+        $invoice = $this->postedInvoice();
+        $body = $this->receiptPayload($invoice->id, $invoice->total_charge_amount, 'OR-DEFAULT-001');
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/receipts', $body)->assertOk()
+            ->assertJsonPath('data.receipt_kind', 'OFFICIAL')
+            ->assertJsonPath('data.counts_as_official_receipt', true)
+            ->assertJsonPath('data.receipt_number', 'CR-0000000001');
+
+        $this->assertSame(1, Receipt::query()->officialFiscal()->count());
+        $this->assertDatabaseHas('document_snapshots', [
+            'document_type' => 'RECEIPT',
+            'document_kind' => 'COLLECTION_RECEIPT',
+        ]);
+    }
+
     public function test_posts_atomic_receipt_with_number_history_and_canonical_pdf(): void
     {
         $invoice = $this->postedInvoice();
@@ -133,6 +183,76 @@ class ReceiptPostingTest extends TestCase
         $this->assertDatabaseCount('document_revisions', 4); // invoice draft/post plus one immutable revision per receipt
     }
 
+    public function test_canonical_receipt_pdf_is_downloadable_by_staff_and_linked_customer(): void
+    {
+        $this->verifiedSmsContact();
+        $invoice = $this->postedInvoice();
+        $response = $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/receipts', $this->receiptPayload($invoice->id, $invoice->total_charge_amount, 'OR-DL-001'))
+            ->assertOk();
+
+        $receiptId = (int) $response->json('data.id');
+        $receiptNumber = (string) $response->json('data.receipt_number');
+        $artifact = DocumentArtifact::where('document_type', 'RECEIPT')->where('document_id', $receiptId)->firstOrFail();
+        $this->assertSame('RENDERED', $artifact->status);
+
+        $staffDownload = $this->actingAs($this->admin, 'sanctum')
+            ->get("/api/v1/receipts/{$receiptId}/artifacts/download");
+        $staffDownload->assertOk();
+        $this->assertStringContainsString('application/pdf', (string) $staffDownload->headers->get('Content-Type'));
+        $this->assertStringContainsString('OR-'.$receiptNumber.'.pdf', (string) $staffDownload->headers->get('Content-Disposition'));
+        $this->assertStringStartsWith('%PDF-', $staffDownload->streamedContent());
+
+        $customerDownload = $this->actingAs($this->customerUser, 'sanctum')
+            ->get("/api/v1/receipts/{$receiptId}/artifacts/download");
+        $customerDownload->assertOk();
+        $this->assertStringStartsWith('%PDF-', $customerDownload->streamedContent());
+        $this->assertSame(
+            hash('sha256', $staffDownload->streamedContent()),
+            hash('sha256', $customerDownload->streamedContent())
+        );
+
+        $bills = $this->actingAs($this->customerUser, 'sanctum')
+            ->getJson('/api/v1/portal/bills?customer_id='.$this->customer->id)
+            ->assertOk();
+        $bill = collect($bills->json('data'))->firstWhere('id', $invoice->id);
+        $this->assertNotNull($bill);
+        $history = collect($bill['receipt_history'] ?? []);
+        $this->assertTrue($history->contains(fn (array $row) => (int) $row['receipt_id'] === $receiptId && ($row['pdf_available'] ?? false) === true));
+    }
+
+    public function test_failed_receipt_artifact_is_retried_on_download_when_private_disk_works(): void
+    {
+        $this->assertSame('local', config('filesystems.disks.private.driver'));
+        $this->assertNotEmpty(config('filesystems.disks.private.root'));
+
+        $this->verifiedSmsContact();
+        $invoice = $this->postedInvoice();
+        $response = $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/receipts', $this->receiptPayload($invoice->id, $invoice->total_charge_amount, 'OR-RETRY-001'))
+            ->assertOk();
+
+        $receiptId = (int) $response->json('data.id');
+        $artifact = DocumentArtifact::where('document_type', 'RECEIPT')->where('document_id', $receiptId)->firstOrFail();
+        Storage::disk('private')->delete($artifact->file_path);
+        $artifact->update([
+            'status' => 'FAILED',
+            'error_message' => 'Disk [private] does not have a configured driver.',
+            'file_size_bytes' => 0,
+            'sha256_hash' => '',
+        ]);
+
+        $download = $this->actingAs($this->admin, 'sanctum')
+            ->get("/api/v1/receipts/{$receiptId}/artifacts/download");
+        $download->assertOk();
+        $this->assertStringStartsWith('%PDF-', $download->streamedContent());
+
+        $artifact->refresh();
+        $this->assertSame('RENDERED', $artifact->status);
+        $this->assertTrue($artifact->existsOnDisk());
+        $this->assertNull($artifact->error_message);
+    }
+
     public function test_withholding_capacity_is_consumed_only_for_amount_actually_applied(): void
     {
         $invoice = $this->postedInvoice();
@@ -149,7 +269,7 @@ class ReceiptPostingTest extends TestCase
 
     protected function postedInvoice()
     {
-        $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', ['customer_id' => $this->customer->id, 'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]]]);
+        $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', ['customer_id' => $this->customer->id, ...$this->invoiceShipmentPayload(), 'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]]]);
         $draft->assertCreated();
         $id = $draft->json('data.id');
         $this->actingAs($this->admin, 'sanctum')->postJson("/api/v1/invoices/drafts/{$id}/post", ['expected_version' => 1])->assertOk();

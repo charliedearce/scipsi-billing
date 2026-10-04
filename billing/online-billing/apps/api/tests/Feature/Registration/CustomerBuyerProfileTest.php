@@ -104,12 +104,16 @@ class CustomerBuyerProfileTest extends TestCase
             ->assertJsonPath('success', true);
 
         // Verify version 1 remains active and unmutated
-        $v1 = BuyerProfileVersion::where('version', 1)->first();
+        $v1 = BuyerProfileVersion::where('buyer_profile_id', $this->customer->buyerProfile->id)
+            ->where('version', 1)
+            ->first();
         $this->assertEquals('Garcia Shipping Line Corp.', $v1->registered_name);
         $this->assertEquals('active', $v1->status);
 
         // Verify version 2 created in pending_review status
-        $v2 = BuyerProfileVersion::where('version', 2)->first();
+        $v2 = BuyerProfileVersion::where('buyer_profile_id', $this->customer->buyerProfile->id)
+            ->where('version', 2)
+            ->first();
         $this->assertNotNull($v2);
         $this->assertEquals('Garcia Shipping Line & Logistics Corporation', $v2->registered_name);
         $this->assertEquals('pending_review', $v2->status);

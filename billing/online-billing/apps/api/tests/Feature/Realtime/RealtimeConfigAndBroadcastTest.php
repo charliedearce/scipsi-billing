@@ -9,9 +9,9 @@ use App\Models\Organization;
 use App\Models\Role;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Broadcast;
-use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
 
 class RealtimeConfigAndBroadcastTest extends TestCase
@@ -81,11 +81,9 @@ class RealtimeConfigAndBroadcastTest extends TestCase
             ]);
     }
 
-    public function test_data_refresh_event_structure_and_after_commit(): void
+    public function test_data_refresh_event_structure_requires_after_commit_dispatch(): void
     {
-        Event::fake([DataRefreshEvent::class]);
-
-        DataRefreshEvent::dispatch(
+        $event = new DataRefreshEvent(
             $this->org->id,
             'billing',
             'invoice',
@@ -94,21 +92,61 @@ class RealtimeConfigAndBroadcastTest extends TestCase
             2
         );
 
-        Event::assertDispatched(DataRefreshEvent::class, function (DataRefreshEvent $event) {
-            $channels = collect($event->broadcastOn())->map(fn ($c) => $c->name)->all();
+        $channels = collect($event->broadcastOn())->map(fn ($channel) => $channel->name)->all();
+        $payload = $event->broadcastWith();
 
-            $payload = $event->broadcastWith();
+        $this->assertInstanceOf(ShouldDispatchAfterCommit::class, $event);
+        $this->assertTrue($event->afterCommit);
+        $this->assertContains('private-org.'.$this->org->id, $channels);
+        $this->assertContains('private-scope.billing.'.$this->org->id, $channels);
+        $this->assertSame('billing', $payload['scope']);
+        $this->assertSame('invoice', $payload['entity']);
+        $this->assertSame(42, $payload['entity_id']);
+        $this->assertSame('updated', $payload['action']);
+        $this->assertSame(2, $payload['version']);
+        $this->assertNotEmpty($payload['timestamp']);
+    }
 
-            return $event->afterCommit === true
-                && in_array('private-org.'.$this->org->id, $channels, true)
-                && in_array('private-scope.billing.'.$this->org->id, $channels, true)
-                && $payload['scope'] === 'billing'
-                && $payload['entity'] === 'invoice'
-                && $payload['entity_id'] === 42
-                && $payload['action'] === 'updated'
-                && $payload['version'] === 2
-                && ! empty($payload['timestamp']);
-        });
+    public function test_queue_refresh_targets_staff_scope_and_owning_customer_only(): void
+    {
+        $event = new DataRefreshEvent(
+            organizationId: $this->org->id,
+            scope: 'queue',
+            entity: 'billing_request',
+            entityId: 73,
+            action: 'correction_requested',
+            userId: $this->activeUser->id,
+            broadcastToOrganization: false,
+        );
+
+        $channels = collect($event->broadcastOn())->map(fn ($channel) => $channel->name)->all();
+
+        $this->assertSame([
+            'private-scope.queue.'.$this->org->id,
+            'private-user.'.$this->activeUser->id,
+        ], $channels);
+        $this->assertNotContains('private-org.'.$this->org->id, $channels);
+    }
+
+    public function test_urgent_transaction_refresh_targets_staff_scope_and_owning_customer_only(): void
+    {
+        $event = new DataRefreshEvent(
+            organizationId: $this->org->id,
+            scope: 'bill_claims',
+            entity: 'bill_claim_request',
+            entityId: 91,
+            action: 'approved',
+            version: 3,
+            userId: $this->activeUser->id,
+            broadcastToOrganization: false,
+        );
+
+        $channels = collect($event->broadcastOn())->map(fn ($channel) => $channel->name)->all();
+
+        $this->assertSame([
+            'private-scope.bill_claims.'.$this->org->id,
+            'private-user.'.$this->activeUser->id,
+        ], $channels);
     }
 
     public function test_broadcasting_auth_for_private_user_channel(): void
@@ -142,6 +180,67 @@ class RealtimeConfigAndBroadcastTest extends TestCase
             ]);
 
         $response->assertStatus(403);
+    }
+
+    public function test_queue_channel_allows_customers_and_tellers_but_denies_ppa_users(): void
+    {
+        $teller = User::where('email', 'teller1@scipsi.test')->firstOrFail();
+        $ppaUser = User::where('email', 'ppa1@ppa.gov.ph')->firstOrFail();
+        $channel = 'private-scope.queue.'.$this->org->id;
+
+        $this->actingAs($this->activeUser, 'sanctum')
+            ->post('/api/v1/broadcasting/auth', [
+                'channel_name' => $channel,
+                'socket_id' => '1234.5678',
+            ])
+            ->assertOk()
+            ->assertJsonStructure(['auth']);
+
+        $this->actingAs($teller, 'sanctum')
+            ->post('/api/v1/broadcasting/auth', [
+                'channel_name' => $channel,
+                'socket_id' => '1234.5678',
+            ])
+            ->assertOk()
+            ->assertJsonStructure(['auth']);
+
+        $this->actingAs($ppaUser, 'sanctum')
+            ->post('/api/v1/broadcasting/auth', [
+                'channel_name' => $channel,
+                'socket_id' => '1234.5678',
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_urgent_staff_scopes_deny_customer_and_unknown_scope(): void
+    {
+        $teller = User::where('email', 'teller1@scipsi.test')->firstOrFail();
+
+        foreach (['bill_claims', 'payments', 'tax_evidence', 'vip_credit', 'corrections'] as $scope) {
+            $channel = 'private-scope.'.$scope.'.'.$this->org->id;
+
+            $this->actingAs($this->activeUser, 'sanctum')
+                ->post('/api/v1/broadcasting/auth', [
+                    'channel_name' => $channel,
+                    'socket_id' => '1234.5678',
+                ])
+                ->assertForbidden();
+
+            $this->actingAs($teller, 'sanctum')
+                ->post('/api/v1/broadcasting/auth', [
+                    'channel_name' => $channel,
+                    'socket_id' => '1234.5678',
+                ])
+                ->assertOk()
+                ->assertJsonStructure(['auth']);
+        }
+
+        $this->actingAs($teller, 'sanctum')
+            ->post('/api/v1/broadcasting/auth', [
+                'channel_name' => 'private-scope.not_registered.'.$this->org->id,
+                'socket_id' => '1234.5678',
+            ])
+            ->assertForbidden();
     }
 
     public function test_broadcasting_auth_for_conversation_channel(): void

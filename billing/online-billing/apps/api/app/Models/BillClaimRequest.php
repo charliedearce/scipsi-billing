@@ -17,6 +17,9 @@ class BillClaimRequest extends Model
 
     public const STATUS_PENDING_TELLER_REVIEW = 'PENDING_TELLER_REVIEW';
 
+    /** Identity verified; customer must preview and accept before My Bills link. */
+    public const STATUS_PENDING_CUSTOMER_ACCEPTANCE = 'PENDING_CUSTOMER_ACCEPTANCE';
+
     public const STATUS_APPROVED = 'APPROVED';
 
     public const STATUS_REJECTED = 'REJECTED';
@@ -34,6 +37,7 @@ class BillClaimRequest extends Model
     public const ACTIVE_STATUSES = [
         self::STATUS_PENDING_VERIFICATION,
         self::STATUS_PENDING_TELLER_REVIEW,
+        self::STATUS_PENDING_CUSTOMER_ACCEPTANCE,
         self::STATUS_APPROVED,
     ];
 

@@ -38,6 +38,15 @@ return [
             'report' => false,
         ],
 
+        // Canonical invoice/OR/statement PDFs and DocumentArtifact::existsOnDisk() use this disk name.
+        // Keep it aligned with local_private (private uploads) on the same storage root.
+        'private' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private'),
+            'visibility' => 'private',
+            'throw' => true,
+        ],
+
         'local_private' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),

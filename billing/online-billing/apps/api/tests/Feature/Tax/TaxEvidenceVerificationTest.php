@@ -368,6 +368,19 @@ class TaxEvidenceVerificationTest extends TestCase
             'event_type' => 'APPROVED',
             'to_status' => 'APPROVED',
         ]);
+
+        $today = Carbon::now()->toDateString();
+        $this->actingAs($this->teller, 'sanctum')
+            ->getJson("/api/v1/admin/tax-evidence/withholding?customer_id={$this->customer1->id}&status=APPROVED&business_date={$today}")
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $cert->id);
+
+        $tomorrow = Carbon::now()->addDay()->toDateString();
+        $this->actingAs($this->teller, 'sanctum')
+            ->getJson("/api/v1/admin/tax-evidence/withholding?customer_id={$this->customer1->id}&status=APPROVED&business_date={$tomorrow}")
+            ->assertOk()
+            ->assertJsonPath('total', 0);
     }
 
     public function test_staff_can_request_correction_and_reject_withholding(): void
@@ -528,6 +541,24 @@ class TaxEvidenceVerificationTest extends TestCase
             'event_type' => 'APPROVED',
             'to_status' => 'APPROVED',
         ]);
+
+        $today = Carbon::now()->toDateString();
+        $baseUrl = "/api/v1/admin/tax-evidence/exemptions?customer_id={$this->customer1->id}&status=APPROVED&business_date={$today}";
+        $this->actingAs($this->teller, 'sanctum')
+            ->getJson("{$baseUrl}&exemption_type=ZERO_RATED")
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $exemption->id);
+        $this->actingAs($this->teller, 'sanctum')
+            ->getJson("{$baseUrl}&exemption_type=VAT_EXEMPT")
+            ->assertOk()
+            ->assertJsonPath('total', 0);
+
+        $afterValidity = Carbon::now()->addMonths(7)->toDateString();
+        $this->actingAs($this->teller, 'sanctum')
+            ->getJson("/api/v1/admin/tax-evidence/exemptions?customer_id={$this->customer1->id}&status=APPROVED&business_date={$afterValidity}&exemption_type=ZERO_RATED")
+            ->assertOk()
+            ->assertJsonPath('total', 0);
     }
 
     public function test_approved_tax_exemption_automatically_applies_zero_rated_vat_in_draft(): void
@@ -569,6 +600,7 @@ class TaxEvidenceVerificationTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer1->id,
+                ...$this->invoiceShipmentPayload(),
                 'business_date' => Carbon::now()->toDateString(),
                 'items' => [
                     ['tariff_code' => 'STEV_DOM', 'quantity' => 10],
@@ -581,29 +613,98 @@ class TaxEvidenceVerificationTest extends TestCase
         $this->assertEquals('ZERO_RATED', $draftRes->json('data.items.0.pricing_snapshot.tax_treatment_key'));
     }
 
+    public function test_approved_non_vat_ruling_is_reflected_in_bill_and_unrelated_ruling_cannot_authorize_posting(): void
+    {
+        $file = $this->createPrivateFileForUser($this->customerUser1);
+        $ruling = $this->taxEvidenceService->submitTaxExemption($this->customerUser1, $this->customer1, [
+            'customer_id' => $this->customer1->id,
+            'exemption_type' => 'VAT_EXEMPT',
+            'legal_basis' => 'Reviewed Non-VAT service ruling',
+            'ruling_or_cert_no' => 'NONVAT-BILL-2026',
+            'private_file_id' => $file->id,
+            'valid_from' => Carbon::now()->subMonth()->toDateString(),
+            'valid_to' => Carbon::now()->addMonth()->toDateString(),
+            'covered_services' => ['STEV_DOM'],
+        ]);
+        $this->taxEvidenceService->reviewTaxExemption($ruling, $this->teller, 'APPROVED');
+
+        $preview = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/calculate', [
+            'customer_id' => $this->customer1->id,
+            'business_date' => Carbon::today('Asia/Manila')->toDateString(),
+            'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]],
+        ]);
+        $preview->assertOk()
+            ->assertJsonPath('data.items.0.snapshot.tax_treatment_key', 'EXEMPT')
+            ->assertJsonPath('data.items.0.tax_amount', '0.00');
+
+        $draft = $this->draftService->createDraft($this->org->id, $this->location->id, $this->admin, [
+            'customer_id' => $this->customer1->id,
+            'business_date' => Carbon::today('Asia/Manila')->toDateString(),
+            ...$this->invoiceShipmentPayload($this->org->id),
+            'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]],
+        ]);
+        $this->assertSame('EXEMPT', $draft->items->first()->pricingSnapshot->tax_treatment_key);
+        $this->assertSame('0.00', $draft->tax_amount);
+
+        $this->taxEvidenceService->revokeTaxExemption($ruling, $this->admin, 'Coverage withdrawn');
+        $otherFile = $this->createPrivateFileForUser($this->customerUser1);
+        $unrelated = $this->taxEvidenceService->submitTaxExemption($this->customerUser1, $this->customer1, [
+            'customer_id' => $this->customer1->id,
+            'exemption_type' => 'VAT_EXEMPT',
+            'legal_basis' => 'Reviewed ruling for a different service',
+            'ruling_or_cert_no' => 'OTHER-BILL-2026',
+            'private_file_id' => $otherFile->id,
+            'valid_from' => Carbon::now()->subMonth()->toDateString(),
+            'valid_to' => Carbon::now()->addMonth()->toDateString(),
+            'covered_services' => ['ARR_FOR'],
+        ]);
+        $this->taxEvidenceService->reviewTaxExemption($unrelated, $this->teller, 'APPROVED');
+
+        $readiness = $this->fiscalService->validateFiscalReadiness($draft->fresh(['items.pricingSnapshot']));
+        $this->assertFalse($readiness['is_fiscal_ready']);
+        $this->assertTrue(collect($readiness['errors'])->contains(fn ($error) => str_contains($error, 'no approved tax exemption')));
+
+        $zeroRatedFile = $this->createPrivateFileForUser($this->customerUser1);
+        $wrongType = $this->taxEvidenceService->submitTaxExemption($this->customerUser1, $this->customer1, [
+            'customer_id' => $this->customer1->id,
+            'exemption_type' => 'ZERO_RATED',
+            'legal_basis' => 'Reviewed zero-rated ruling for this service',
+            'ruling_or_cert_no' => 'ZERORATE-BILL-2026',
+            'private_file_id' => $zeroRatedFile->id,
+            'valid_from' => Carbon::now()->subMonth()->toDateString(),
+            'valid_to' => Carbon::now()->addMonth()->toDateString(),
+            'covered_services' => ['STEV_DOM'],
+        ]);
+        $this->taxEvidenceService->reviewTaxExemption($wrongType, $this->teller, 'APPROVED');
+        $wrongTypeReadiness = $this->fiscalService->validateFiscalReadiness($draft->fresh(['items.pricingSnapshot']));
+        $this->assertFalse($wrongTypeReadiness['is_fiscal_ready']);
+        $this->assertTrue(collect($wrongTypeReadiness['errors'])->contains(fn ($error) => str_contains($error, 'no approved tax exemption')));
+    }
+
     public function test_fiscal_readiness_validates_exemption_evidence_for_zero_rated_and_exempt_invoices(): void
     {
-        $today = Carbon::now()->toDateString();
-        // 1. Post attempt without approved exemption should fail fiscal readiness validation
-        // Create draft invoice for customer 2 (no exemption)
-        $draft = $this->draftService->createDraft($this->org->id, $this->location->id, $this->admin, [
+        // Match AccountingPeriodService: business dates are evaluated in Asia/Manila.
+        $today = Carbon::today('Asia/Manila')->toDateString();
+
+        // Tariff-native ZERO_RATED (foreign ARR_FOR) does not require a customer PEZA/BOI exemption.
+        $nativeZeroDraft = $this->draftService->createDraft($this->org->id, $this->location->id, $this->admin, [
             'customer_id' => $this->customer2->id,
             'business_date' => $today,
+            ...$this->invoiceShipmentPayload($this->org->id, ['route_type' => 'FOREIGN']),
             'items' => [
                 [
-                    'tariff_code' => 'ARR_FOR', // Foreign cargo default is ZERO_RATED in seeder
+                    'tariff_code' => 'ARR_FOR',
                     'quantity' => 5,
                 ],
             ],
         ]);
+        $nativeReady = $this->fiscalService->validateFiscalReadiness($nativeZeroDraft);
+        $this->assertTrue(
+            collect($nativeReady['errors'])->every(fn ($v) => ! str_contains($v, 'approved tax exemption')),
+            'Tariff-native zero-rated lines must not demand a customer tax exemption.'
+        );
 
-        $violations = $this->fiscalService->validateFiscalReadiness($draft);
-        $this->assertFalse($violations['is_fiscal_ready']);
-        $this->assertTrue(collect($violations['errors'])->contains(function ($v) {
-            return str_contains($v, 'has no approved tax exemption');
-        }));
-
-        // 2. Add and approve exemption for customer 2
+        // Exemption-driven ZERO_RATED on an otherwise VATABLE tariff requires approved evidence.
         $file = $this->createPrivateFileForUser($this->customerUser2);
         $exemption = $this->taxEvidenceService->submitTaxExemption(
             $this->customerUser2,
@@ -616,18 +717,85 @@ class TaxEvidenceVerificationTest extends TestCase
                 'private_file_id' => $file->id,
                 'valid_from' => Carbon::now()->subMonths(6)->toDateString(),
                 'valid_to' => Carbon::now()->addMonths(6)->toDateString(),
-                'covered_services' => ['ARR_FOR', 'ARRASTRE'],
+                'covered_services' => ['STEV_DOM', 'STEVEDORING'],
             ]
         );
         $this->taxEvidenceService->reviewTaxExemption($exemption, $this->teller, 'APPROVED');
 
-        // Now fiscal readiness should pass
-        $newViolations = $this->fiscalService->validateFiscalReadiness($draft);
-        $this->assertTrue($newViolations['is_fiscal_ready']);
-        $this->assertEmpty($newViolations['errors']);
+        $exemptDraft = $this->draftService->createDraft($this->org->id, $this->location->id, $this->admin, [
+            'customer_id' => $this->customer2->id,
+            'business_date' => $today,
+            ...$this->invoiceShipmentPayload($this->org->id),
+            'items' => [
+                [
+                    'tariff_code' => 'STEV_DOM',
+                    'quantity' => 5,
+                ],
+            ],
+        ]);
+        $this->assertEquals('ZERO_RATED', $exemptDraft->items->first()->pricingSnapshot->tax_treatment_key);
+        $withExemption = $this->fiscalService->validateFiscalReadiness($exemptDraft);
+        $this->assertTrue($withExemption['is_fiscal_ready']);
+        $this->assertEmpty($withExemption['errors']);
 
-        // Posting should succeed cleanly
-        $invoice = $this->postingService->postInvoice($draft, $this->admin, 1);
+        // Simulate a VATABLE tariff line marked ZERO_RATED without an effective exemption.
+        $this->taxEvidenceService->revokeTaxExemption(
+            $exemption,
+            $this->admin,
+            'Suspended for fiscal readiness regression'
+        );
+        $orphanDraft = $this->draftService->createDraft($this->org->id, $this->location->id, $this->admin, [
+            'customer_id' => $this->customer2->id,
+            'business_date' => $today,
+            ...$this->invoiceShipmentPayload($this->org->id),
+            'items' => [
+                [
+                    'tariff_code' => 'STEV_DOM',
+                    'quantity' => 5,
+                ],
+            ],
+        ]);
+        $snap = $orphanDraft->items->first()->pricingSnapshot;
+        $this->assertEquals('VATABLE', $snap->tax_treatment_key);
+        $snap->update(['tax_treatment_key' => 'ZERO_RATED']);
+        $orphanDraft->unsetRelation('items');
+
+        $violations = $this->fiscalService->validateFiscalReadiness($orphanDraft->fresh(['items.pricingSnapshot', 'items.tariffVersion']));
+        $this->assertFalse($violations['is_fiscal_ready']);
+        $this->assertTrue(collect($violations['errors'])->contains(function ($v) {
+            return str_contains($v, 'no approved tax exemption');
+        }));
+
+        // Restore exemption and confirm posting of exemption-driven zero-rated STEV_DOM.
+        $file2 = $this->createPrivateFileForUser($this->customerUser2);
+        $exemption2 = $this->taxEvidenceService->submitTaxExemption(
+            $this->customerUser2,
+            $this->customer2,
+            [
+                'customer_id' => $this->customer2->id,
+                'exemption_type' => 'ZERO_RATED',
+                'legal_basis' => 'NIRC Section 109 Exempt Agricultural Sea Cargo',
+                'ruling_or_cert_no' => 'NIRC-109-2026-B',
+                'private_file_id' => $file2->id,
+                'valid_from' => Carbon::now()->subMonths(6)->toDateString(),
+                'valid_to' => Carbon::now()->addMonths(6)->toDateString(),
+                'covered_services' => ['STEV_DOM', 'STEVEDORING'],
+            ]
+        );
+        $this->taxEvidenceService->reviewTaxExemption($exemption2, $this->teller, 'APPROVED');
+
+        $postable = $this->draftService->createDraft($this->org->id, $this->location->id, $this->admin, [
+            'customer_id' => $this->customer2->id,
+            'business_date' => $today,
+            ...$this->invoiceShipmentPayload($this->org->id),
+            'items' => [
+                [
+                    'tariff_code' => 'STEV_DOM',
+                    'quantity' => 5,
+                ],
+            ],
+        ]);
+        $invoice = $this->postingService->postInvoice($postable, $this->admin, 1);
         $this->assertEquals('POSTED', $invoice->status);
         $this->assertEquals('0.00', $invoice->tax_amount);
     }

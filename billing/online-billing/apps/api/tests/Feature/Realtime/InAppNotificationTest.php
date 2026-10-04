@@ -186,6 +186,58 @@ class InAppNotificationTest extends TestCase
         $user2Mark->assertStatus(404);
     }
 
+    public function test_work_channel_excludes_chat_from_bell_counts(): void
+    {
+        InAppNotification::create([
+            'organization_id' => $this->org->id,
+            'user_id' => $this->user1->id,
+            'event_id' => (string) Str::uuid(),
+            'type' => 'PAYMENT',
+            'title' => 'Proof needs review',
+            'body' => 'A payment proof is waiting.',
+            'is_read' => false,
+        ]);
+
+        InAppNotification::create([
+            'organization_id' => $this->org->id,
+            'user_id' => $this->user1->id,
+            'event_id' => (string) Str::uuid(),
+            'type' => InAppNotification::TYPE_CHAT_MESSAGE,
+            'title' => 'New message: Request #1',
+            'body' => 'Hello from counter',
+            'is_read' => false,
+            'data' => ['conversation_id' => 9],
+        ]);
+
+        $this->actingAs($this->user1, 'sanctum')
+            ->getJson('/api/v1/notifications/unread-count?channel=work')
+            ->assertOk()
+            ->assertJsonPath('unread_count', 1)
+            ->assertJsonPath('channel', 'work');
+
+        $this->actingAs($this->user1, 'sanctum')
+            ->getJson('/api/v1/notifications?channel=work')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.type', 'PAYMENT');
+
+        $this->actingAs($this->user1, 'sanctum')
+            ->postJson('/api/v1/notifications/read-all', ['channel' => 'work'])
+            ->assertOk()
+            ->assertJsonPath('updated_count', 1);
+
+        $this->assertDatabaseHas('in_app_notifications', [
+            'user_id' => $this->user1->id,
+            'type' => InAppNotification::TYPE_CHAT_MESSAGE,
+            'is_read' => false,
+        ]);
+
+        $this->actingAs($this->user1, 'sanctum')
+            ->getJson('/api/v1/notifications/unread-count?channel=chat')
+            ->assertOk()
+            ->assertJsonPath('unread_count', 1);
+    }
+
     public function test_broadcast_event_payload_and_after_commit(): void
     {
         Event::fake([InAppNotificationEvent::class]);

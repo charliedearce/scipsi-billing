@@ -1,41 +1,72 @@
 <template>
-  <div class="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
-    <section
-      class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 flex items-center justify-between"
-    >
-      <div>
-        <h1 class="text-xl font-bold">VIP Credit &amp; Collections</h1>
-        <p class="text-sm text-slate-500 mt-1">
-          Publish versioned terms, limits, overdue restrictions and late-charge policies. Existing
-          credit charges keep their captured terms; late charges never rewrite an invoice.
-        </p>
+  <div class="page-content space-y-5">
+    <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div class="flex items-start gap-3.5">
+        <div class="size-11 flex-cc shrink-0 rounded-lg bg-theme/10 text-theme">
+          <ArtSvgIcon icon="ri:safe-2-line" class="text-2xl" />
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-xl font-medium text-g-900">VIP Credit &amp; Collections</h1>
+          <p class="mt-1 max-w-2xl text-sm text-g-500">
+            Publish versioned terms, limits, overdue restrictions and late-charge policies. Existing
+            credit charges keep their captured terms; late charges never rewrite an invoice.
+          </p>
+        </div>
       </div>
-      <ElButton :loading="loading" @click="load">Refresh</ElButton>
-    </section>
+      <ElButton :loading="loading" @click="load">
+        <ArtSvgIcon icon="ri:refresh-line" class="mr-1" />
+        Refresh
+      </ElButton>
+    </header>
 
-    <ElCard shadow="never">
-      <template #header
-        ><h2 class="font-semibold">New organization credit policy draft</h2></template
-      >
+    <section class="art-card p-5">
+      <div class="art-card-header">
+        <div class="title">
+          <h4>New organization credit policy draft</h4>
+          <p>
+            Set the default rules for VIP accounts. Creating a draft saves these values for review;
+            only publishing makes the version available for new credit charges.
+          </p>
+        </div>
+      </div>
       <ElForm :model="form" label-position="top" class="grid grid-cols-1 md:grid-cols-2 gap-x-5">
-        <ElFormItem label="Currency"><ElInput v-model="form.currency" maxlength="3" /></ElFormItem>
+        <ElFormItem label="Currency">
+          <ElInput v-model="form.currency" maxlength="3" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Currency used for this policy and its credit limit.</p
+          >
+        </ElFormItem>
         <ElFormItem label="Credit limit mode">
           <ElSelect v-model="form.default_credit_limit_mode">
             <ElOption label="Capped limit" value="CAPPED" />
             <ElOption label="Explicitly unlimited" value="UNLIMITED" />
           </ElSelect>
+          <p class="w-full text-xs text-g-500 mt-1">
+            Capped limits new credit by amount. Unlimited removes the amount cap; other credit rules
+            still apply.
+          </p>
         </ElFormItem>
         <ElFormItem v-if="form.default_credit_limit_mode === 'CAPPED'" label="Default limit">
           <ElInput v-model="form.default_credit_limit_amount" inputmode="decimal" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Maximum outstanding credit for an account using the default limit.</p
+          >
         </ElFormItem>
         <ElFormItem label="Payment terms (calendar days)">
           <ElInputNumber v-model="form.payment_terms_days" :min="1" :max="3650" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Days added to the selected basis date to set a new credit charge's due date.</p
+          >
         </ElFormItem>
         <ElFormItem label="Due-date basis">
           <ElSelect v-model="form.due_date_basis">
             <ElOption label="Invoice date" value="INVOICE_DATE" />
             <ElOption label="Credit-charge date" value="CREDIT_CHARGE_DATE" />
           </ElSelect>
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Start the payment term from the invoice date or the day the bill is charged to
+            credit.</p
+          >
         </ElFormItem>
         <ElFormItem label="Overdue restriction">
           <ElSelect v-model="form.overdue_restriction">
@@ -43,9 +74,17 @@
             <ElOption label="Warn" value="WARN" />
             <ElOption label="Block new credit" value="BLOCK" />
           </ElSelect>
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Allow or warn lets new credit continue. Block stops new credit when an unpaid charge
+            passes its due date plus grace days; existing debt can still be repaid.</p
+          >
         </ElFormItem>
-        <ElFormItem label="Grace days">
+        <ElFormItem label="Overdue grace days">
           <ElInputNumber v-model="form.overdue_grace_days" :min="0" :max="365" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Extra days after the due date before the overdue restriction applies. This does not
+            move the due date.</p
+          >
         </ElFormItem>
         <ElFormItem label="Effective from">
           <ElDatePicker
@@ -54,18 +93,35 @@
             value-format="YYYY-MM-DDTHH:mm:ssZ"
             class="!w-full"
           />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >When the published version may start applying to new credit activity. Prefer a start at
+            or after the current published policy. If the draft starts earlier, publish advances it
+            and ends the open prior policy so windows do not overlap.</p
+          >
         </ElFormItem>
         <ElFormItem label="Allow account-specific overrides" class="md:col-span-2">
           <ElSwitch v-model="form.allow_customer_overrides" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Permit approved VIP account profiles to use their own limit, terms, or overdue rules
+            instead of these defaults.</p
+          >
         </ElFormItem>
       </ElForm>
       <div class="flex justify-end">
         <ElButton type="primary" :loading="saving" @click="create">Create draft</ElButton>
       </div>
-    </ElCard>
+    </section>
 
-    <ElCard shadow="never">
-      <template #header><h2 class="font-semibold">Credit policy history</h2></template>
+    <section class="art-card p-5">
+      <div class="art-card-header">
+        <div class="title">
+          <h4>Credit policy history</h4>
+          <p>
+            Drafts can be published or deleted. Published versions apply by effective date; existing
+            charges keep their captured terms.
+          </p>
+        </div>
+      </div>
       <ElTable :data="policies">
         <ElTableColumn prop="version_number" label="Version" width="100" />
         <ElTableColumn prop="currency" label="Currency" width="100" />
@@ -78,38 +134,43 @@
         </ElTableColumn>
         <ElTableColumn label="Terms" min-width="160">
           <template #default="{ row }"
-            >{{ row.payment_terms_days }} days · {{ row.due_date_basis }}</template
+            >{{ row.payment_terms_days }} days from
+            {{
+              row.due_date_basis === 'INVOICE_DATE' ? 'invoice date' : 'credit-charge date'
+            }}</template
           >
         </ElTableColumn>
-        <ElTableColumn prop="overdue_restriction" label="Overdue" width="130" />
+        <ElTableColumn label="Overdue rule" min-width="150">
+          <template #default="{ row }">{{
+            row.overdue_restriction === 'BLOCK' ? 'Block new credit' : row.overdue_restriction
+          }}</template>
+        </ElTableColumn>
         <ElTableColumn prop="status" label="Status" width="120" />
-        <ElTableColumn label="Actions" width="130">
+        <ElTableColumn label="Actions" width="180">
           <template #default="{ row }">
-            <ElButton
-              v-if="row.status === 'DRAFT'"
-              type="primary"
-              size="small"
-              @click="publish(row)"
-              >Publish</ElButton
-            >
+            <div v-if="row.status === 'DRAFT'" class="flex flex-wrap gap-2">
+              <ElButton type="primary" size="small" @click="publish(row)">Publish</ElButton>
+              <ElButton type="danger" size="small" plain @click="removeDraft(row)">Delete</ElButton>
+            </div>
           </template>
         </ElTableColumn>
       </ElTable>
-    </ElCard>
+    </section>
 
-    <ElCard shadow="never">
-      <template #header>
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <h2 class="font-semibold">VIP late-charge policy (W30)</h2>
-            <p class="text-xs text-slate-500 mt-1">
-              Assessments are separate from invoices and fiscal documents. Accountant tax/GL mapping
-              remains pending before operational activation.
-            </p>
-          </div>
-          <ElButton :loading="lateRunning" @click="runLateCharges">Run assessment</ElButton>
+    <section class="art-card p-5">
+      <div class="art-card-header">
+        <div class="title">
+          <h4>VIP late-charge policy</h4>
+          <p>
+            Late charges are separate from invoices. Tax, document, and accounting treatment still
+            needs accountant review. Run assessment checks eligible unpaid VIP credit for today.
+          </p>
         </div>
-      </template>
+        <ElButton :loading="lateRunning" @click="runLateCharges">
+          <ArtSvgIcon icon="ri:play-circle-line" class="mr-1" />
+          Run late-charge assessment
+        </ElButton>
+      </div>
       <ElForm
         :model="lateForm"
         label-position="top"
@@ -120,24 +181,41 @@
             <ElOption label="Percentage of unpaid principal" value="PERCENTAGE" />
             <ElOption label="Fixed amount" value="FIXED" />
           </ElSelect>
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Use a percentage of unpaid principal or a fixed amount per assessment.</p
+          >
         </ElFormItem>
         <ElFormItem label="Cadence">
           <ElSelect v-model="lateForm.cadence">
             <ElOption label="Once" value="ONCE" />
             <ElOption label="Monthly" value="MONTHLY" />
           </ElSelect>
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Assess once for a credit charge, or once per eligible monthly cycle.</p
+          >
         </ElFormItem>
         <ElFormItem v-if="lateForm.basis === 'PERCENTAGE'" label="Percentage rate">
           <ElInput v-model="lateForm.percentage_rate" inputmode="decimal" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Rate applied to unpaid principal only; earlier late charges are excluded.</p
+          >
         </ElFormItem>
         <ElFormItem v-else label="Fixed amount">
           <ElInput v-model="lateForm.fixed_amount" inputmode="decimal" />
+          <p class="w-full text-xs text-g-500 mt-1">Amount charged for each eligible assessment.</p>
         </ElFormItem>
-        <ElFormItem label="Grace days">
+        <ElFormItem label="Late-charge grace days">
           <ElInputNumber v-model="lateForm.grace_days" :min="0" :max="3650" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Days past due with no late charge. Separate from the overdue credit restriction
+            above.</p
+          >
         </ElFormItem>
         <ElFormItem label="Cap amount">
           <ElInput v-model="lateForm.cap_amount" inputmode="decimal" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Maximum amount for one assessment. Leave blank for no per-assessment cap.</p
+          >
         </ElFormItem>
         <ElFormItem label="Effective from">
           <ElDatePicker
@@ -146,20 +224,30 @@
             value-format="YYYY-MM-DDTHH:mm:ssZ"
             class="!w-full"
           />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >When this published policy can be captured on future VIP credit charges.</p
+          >
         </ElFormItem>
         <ElFormItem label="Contract reference">
           <ElInput v-model="lateForm.contract_reference" maxlength="128" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Optional reference to the agreed customer terms supporting this charge.</p
+          >
         </ElFormItem>
       </ElForm>
-      <p class="text-xs text-slate-500 mb-3">
-        Default bands: 1-30 and 31+ (contiguous, non-overlapping). Formula applies to unpaid
-        principal only; compounding is disabled.
+      <p class="text-xs text-g-500 mb-3">
+        Fixed aging bands: 1–30 and 31+ days past due. The same rate or amount applies in both
+        bands. The calculation excludes earlier late charges and truncates to two decimals.
       </p>
       <div class="flex justify-end mb-6">
         <ElButton type="primary" :loading="lateSaving" @click="createLatePolicy"
           >Create late-charge draft</ElButton
         >
       </div>
+      <p class="text-xs text-g-500 mb-3"
+        >Create a draft to review the terms. Publishing applies it only to future VIP credit
+        charges; it does not backfill old debt.</p
+      >
       <ElTable :data="latePolicies">
         <ElTableColumn prop="version_number" label="Version" width="100" />
         <ElTableColumn prop="basis" label="Basis" width="120" />
@@ -172,22 +260,37 @@
           }}</template>
         </ElTableColumn>
         <ElTableColumn prop="status" label="Status" width="120" />
-        <ElTableColumn label="Actions" width="130">
+        <ElTableColumn label="Actions" width="180">
           <template #default="{ row }">
-            <ElButton
-              v-if="row.status === 'DRAFT'"
-              type="primary"
-              size="small"
-              @click="publishLate(row)"
-              >Publish</ElButton
-            >
+            <div v-if="row.status === 'DRAFT'" class="flex flex-wrap gap-2">
+              <ElButton type="primary" size="small" @click="publishLate(row)">Publish</ElButton>
+              <ElButton type="danger" size="small" plain @click="removeLateDraft(row)"
+                >Delete</ElButton
+              >
+            </div>
           </template>
         </ElTableColumn>
       </ElTable>
-    </ElCard>
+    </section>
 
-    <ElCard shadow="never">
-      <template #header><h2 class="font-semibold">Recent late-charge assessments</h2></template>
+    <section class="art-card p-5">
+      <div class="art-card-header">
+        <div class="title">
+          <h4>Recent late-charge assessments</h4>
+          <p>
+            Each row shows the checked date, days past due, assessed amount, and fiscal review
+            status. Waive does not create a fiscal document; assessments stay pending accountant
+            review until the fiscal gate is closed.
+          </p>
+        </div>
+      </div>
+      <ElAlert
+        class="mb-4"
+        type="info"
+        :closable="false"
+        show-icon
+        title="Assessments remain PENDING_ACCOUNTANT_REVIEW until fiscal mapping is approved. Waive clears the assessment only."
+      />
       <ElTable :data="lateAssessments">
         <ElTableColumn label="Customer" min-width="160">
           <template #default="{ row }">{{ row.customer?.name || '—' }}</template>
@@ -195,15 +298,33 @@
         <ElTableColumn label="Invoice" width="140">
           <template #default="{ row }">{{ row.invoice?.invoice_number || '—' }}</template>
         </ElTableColumn>
-        <ElTableColumn prop="as_of_date" label="As of" width="120" />
-        <ElTableColumn prop="days_past_due" label="Days" width="80" />
+        <ElTableColumn prop="as_of_date" label="Checked on" width="120" />
+        <ElTableColumn prop="days_past_due" label="Days past due" width="120" />
         <ElTableColumn label="Amount" width="120">
           <template #default="{ row }">{{ money(row.assessed_amount) }}</template>
         </ElTableColumn>
         <ElTableColumn prop="status" label="Status" width="120" />
-        <ElTableColumn prop="fiscal_mapping_status" label="Fiscal" min-width="180" />
+        <ElTableColumn label="Tax / accounting review" min-width="180">
+          <template #default="{ row }">{{
+            row.fiscal_mapping_status === 'PENDING_ACCOUNTANT_REVIEW'
+              ? 'Pending accountant review'
+              : row.fiscal_mapping_status
+          }}</template>
+        </ElTableColumn>
+        <ElTableColumn label="Actions" width="110" fixed="right">
+          <template #default="{ row }">
+            <ElButton
+              v-if="canWaiveAssessment(row)"
+              type="warning"
+              size="small"
+              link
+              @click="waiveAssessment(row)"
+              >Waive</ElButton
+            >
+          </template>
+        </ElTableColumn>
       </ElTable>
-    </ElCard>
+    </section>
   </div>
 </template>
 <script setup lang="ts">
@@ -211,16 +332,19 @@
   import { ElMessage, ElMessageBox } from 'element-plus'
   import {
     createCreditPolicy,
+    deleteCreditPolicyDraft,
     fetchCreditPolicies,
     publishCreditPolicy,
     type CreditPolicyVersion
   } from '@/api/vipCredit'
   import {
     createLateChargePolicy,
+    deleteLateChargePolicyDraft,
     fetchLateChargeAssessments,
     fetchLateChargePolicies,
     publishLateChargePolicy,
     runLateChargeAssessments,
+    waiveLateChargeAssessment,
     type LateChargeAssessment,
     type LateChargePolicyVersion
   } from '@/api/lateCharges'
@@ -312,6 +436,22 @@
     }
   }
 
+  async function removeDraft(policy: CreditPolicyVersion) {
+    try {
+      await ElMessageBox.confirm(
+        `Delete credit policy draft v${policy.version_number}? This cannot be undone.`,
+        'Delete draft',
+        { type: 'warning', confirmButtonText: 'Delete draft', cancelButtonText: 'Cancel' }
+      )
+      await deleteCreditPolicyDraft(policy.id, policy.lock_version)
+      ElMessage.success('Credit policy draft deleted.')
+      await load()
+    } catch (error: any) {
+      if (error !== 'cancel' && error !== 'close')
+        ElMessage.error(error?.message || 'Unable to delete credit policy draft.')
+    }
+  }
+
   async function createLatePolicy() {
     lateSaving.value = true
     try {
@@ -357,6 +497,22 @@
     }
   }
 
+  async function removeLateDraft(policy: LateChargePolicyVersion) {
+    try {
+      await ElMessageBox.confirm(
+        `Delete late-charge policy draft v${policy.version_number}? This cannot be undone.`,
+        'Delete draft',
+        { type: 'warning', confirmButtonText: 'Delete draft', cancelButtonText: 'Cancel' }
+      )
+      await deleteLateChargePolicyDraft(policy.id, policy.lock_version)
+      ElMessage.success('Late-charge policy draft deleted.')
+      await load()
+    } catch (error: any) {
+      if (error !== 'cancel' && error !== 'close')
+        ElMessage.error(error?.message || 'Unable to delete late-charge policy draft.')
+    }
+  }
+
   async function runLateCharges() {
     lateRunning.value = true
     try {
@@ -370,6 +526,31 @@
       ElMessage.error(error?.message || 'Unable to run late-charge assessment.')
     } finally {
       lateRunning.value = false
+    }
+  }
+
+  function canWaiveAssessment(row: LateChargeAssessment) {
+    return row.status === 'POSTED' || row.status === 'ON_HOLD'
+  }
+
+  async function waiveAssessment(row: LateChargeAssessment) {
+    try {
+      const result = await ElMessageBox.prompt(
+        'Waive clears this assessment only. It does not create a fiscal document or reverse posted collections.',
+        'Waive late-charge assessment',
+        {
+          inputPattern: /.{3,}/,
+          inputErrorMessage: 'Give a reason of at least three characters.',
+          confirmButtonText: 'Waive',
+          type: 'warning'
+        }
+      )
+      await waiveLateChargeAssessment(row.id, row.lock_version, result.value)
+      ElMessage.success('Late-charge assessment waived.')
+      await load()
+    } catch (error: any) {
+      if (error !== 'cancel' && error !== 'close')
+        ElMessage.error(error?.message || 'Unable to waive assessment.')
     }
   }
 

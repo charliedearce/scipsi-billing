@@ -118,6 +118,7 @@ class InvoiceIssuanceArtifactService
                 'email' => $invoice->buyer_snapshot_email ?? '',
                 'phone' => $invoice->buyer_snapshot_phone ?? '',
             ],
+            'shipment' => $this->shipmentParticulars($invoice),
             'totals' => [
                 'vatable_sales' => number_format((float) ($invoice->net_amount ?? $invoice->total_vatable_sales ?? 0), 2),
                 'zero_rated_sales' => number_format((float) ($invoice->total_zero_rated_sales ?? 0), 2),
@@ -128,6 +129,28 @@ class InvoiceIssuanceArtifactService
                 'total_amount_due' => number_format((float) $invoice->total_charge_amount, 2),
             ],
             'items' => $items,
+        ];
+    }
+
+    /**
+     * Shipment facts already stored on the invoice. Route is a tariff selector, not a tax class.
+     *
+     * @return array{vessel_name:string,voyage:string,movement:string,route:string,notes:string}
+     */
+    private function shipmentParticulars(Invoice $invoice): array
+    {
+        $route = match ($invoice->route_type) {
+            'DOMESTIC' => 'Domestic',
+            'FOREIGN' => 'Foreign',
+            default => '',
+        };
+
+        return [
+            'vessel_name' => (string) ($invoice->vessel_name ?? ''),
+            'voyage' => (string) ($invoice->voyage ?? ''),
+            'movement' => in_array($invoice->movement_type, ['IN', 'OUT'], true) ? $invoice->movement_type : '',
+            'route' => $route,
+            'notes' => (string) ($invoice->notes ?? ''),
         ];
     }
 

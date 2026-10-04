@@ -6,10 +6,11 @@ use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class DataRefreshEvent implements ShouldBroadcastNow
+class DataRefreshEvent implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
@@ -35,6 +36,8 @@ class DataRefreshEvent implements ShouldBroadcastNow
         public int|string|null $entityId = null,
         public string $action = 'updated',
         public ?int $version = null,
+        public ?int $userId = null,
+        public bool $broadcastToOrganization = true,
     ) {}
 
     /**
@@ -44,10 +47,17 @@ class DataRefreshEvent implements ShouldBroadcastNow
      */
     public function broadcastOn(): array
     {
-        return [
-            new PrivateChannel('org.'.$this->organizationId),
-            new PrivateChannel('scope.'.$this->scope.'.'.$this->organizationId),
-        ];
+        $channels = [new PrivateChannel('scope.'.$this->scope.'.'.$this->organizationId)];
+
+        if ($this->broadcastToOrganization) {
+            array_unshift($channels, new PrivateChannel('org.'.$this->organizationId));
+        }
+
+        if ($this->userId !== null) {
+            $channels[] = new PrivateChannel('user.'.$this->userId);
+        }
+
+        return $channels;
     }
 
     /**

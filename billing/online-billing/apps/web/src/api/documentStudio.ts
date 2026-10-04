@@ -5,6 +5,7 @@ export type DocumentKind =
   | 'SERVICE_NSCL'
   | 'PPA'
   | 'COLLECTION_RECEIPT'
+  | 'ACKNOWLEDGEMENT_RECEIPT'
   | 'ACCOUNT_STATEMENT'
   | 'YELLOW_INVOICE'
   | 'WHITE_RECEIPT'
@@ -87,13 +88,13 @@ export interface DocumentTemplateAsset {
 }
 
 export function fetchTemplates() {
-  return request.get<{ data: DocumentTemplate[] }>({
+  return request.get<DocumentTemplate[]>({
     url: '/api/v1/admin/document-studio/templates'
   })
 }
 
 export function fetchTemplate(id: number) {
-  return request.get<{ data: DocumentTemplate }>({
+  return request.get<DocumentTemplate>({
     url: `/api/v1/admin/document-studio/templates/${id}`
   })
 }
@@ -105,14 +106,14 @@ export function createTemplate(data: {
   description?: string
   layout_definition?: Record<string, any>
 }) {
-  return request.post<{ message: string; data: DocumentTemplate }>({
+  return request.post<DocumentTemplate>({
     url: '/api/v1/admin/document-studio/templates',
     data
   })
 }
 
 export function forkDraftVersion(templateId: number) {
-  return request.post<{ message: string; data: DocumentTemplateVersion }>({
+  return request.post<DocumentTemplateVersion>({
     url: `/api/v1/admin/document-studio/templates/${templateId}/versions`
   })
 }
@@ -122,42 +123,54 @@ export function updateDraftVersion(
   versionId: number,
   layoutDefinition: Record<string, any>
 ) {
-  return request.put<{ message: string; data: DocumentTemplateVersion }>({
+  return request.put<DocumentTemplateVersion>({
     url: `/api/v1/admin/document-studio/templates/${templateId}/versions/${versionId}`,
     data: { layout_definition: layoutDefinition }
   })
 }
 
 export function validateTemplateVersion(templateId: number, versionId: number) {
-  return request.post<{
-    message: string
-    data: NonNullable<DocumentTemplateVersion['validation_summary']>
-  }>({
+  return request.post<NonNullable<DocumentTemplateVersion['validation_summary']>>({
     url: `/api/v1/admin/document-studio/templates/${templateId}/versions/${versionId}/validate`
   })
 }
 
-export function previewTemplateVersion(templateId: number, versionId: number) {
-  return request.post<{ data: { pdf_base64: string; mime_type: string } }>({
-    url: `/api/v1/admin/document-studio/templates/${templateId}/versions/${versionId}/preview?format=base64`
+export function previewTemplateVersion(
+  templateId: number,
+  versionId: number,
+  layoutDefinition?: Record<string, unknown>
+) {
+  return request.post<{ pdf_base64: string; mime_type: string }>({
+    url: `/api/v1/admin/document-studio/templates/${templateId}/versions/${versionId}/preview?format=base64`,
+    data: layoutDefinition ? { layout_definition: layoutDefinition } : undefined,
+    timeout: 30000,
+    showErrorMessage: false
+  })
+}
+
+export function downloadDocumentTemplateAsset(id: number) {
+  return request.get<Blob>({
+    url: `/api/v1/admin/document-studio/assets/${id}/download`,
+    responseType: 'blob',
+    showErrorMessage: false
   })
 }
 
 export function publishTemplateVersion(templateId: number, versionId: number) {
-  return request.post<{ message: string; data: DocumentTemplateVersion }>({
+  return request.post<DocumentTemplateVersion>({
     url: `/api/v1/admin/document-studio/templates/${templateId}/versions/${versionId}/publish`
   })
 }
 
 export function retireTemplateVersion(templateId: number, versionId: number, reason: string) {
-  return request.post<{ message: string; data: DocumentTemplateVersion }>({
+  return request.post<DocumentTemplateVersion>({
     url: `/api/v1/admin/document-studio/templates/${templateId}/versions/${versionId}/retire`,
     data: { reason }
   })
 }
 
 export function fetchActivations() {
-  return request.get<{ data: DocumentTemplateActivation[] }>({
+  return request.get<DocumentTemplateActivation[]>({
     url: '/api/v1/admin/document-studio/activations'
   })
 }
@@ -169,27 +182,27 @@ export function activateTemplateVersion(data: {
   effective_from?: string
   effective_to?: string | null
 }) {
-  return request.post<{ message: string; data: DocumentTemplateActivation }>({
+  return request.post<DocumentTemplateActivation>({
     url: '/api/v1/admin/document-studio/activations',
     data
   })
 }
 
 export function fetchDocumentTemplateAssets() {
-  return request.get<{ data: DocumentTemplateAsset[] }>({
+  return request.get<DocumentTemplateAsset[]>({
     url: '/api/v1/admin/document-studio/assets'
   })
 }
 
 export function uploadDocumentTemplateAsset(data: FormData) {
-  return request.post<{ message: string; data: DocumentTemplateAsset }>({
+  return request.post<DocumentTemplateAsset>({
     url: '/api/v1/admin/document-studio/assets',
     data
   })
 }
 
 export function retireDocumentTemplateAsset(id: number, reason: string) {
-  return request.post<{ message: string; data: DocumentTemplateAsset }>({
+  return request.post<DocumentTemplateAsset>({
     url: `/api/v1/admin/document-studio/assets/${id}/retire`,
     data: { reason }
   })

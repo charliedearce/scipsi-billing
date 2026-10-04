@@ -27,7 +27,15 @@ class CustomerBillingRequestController extends Controller
         $customerIds = $this->resolveAuthorizedCustomerIds($user);
 
         $query = BillingRequest::whereIn('customer_id', $customerIds)
-            ->with(['location', 'documents.documentType', 'documents.privateFile.latestVersion', 'invoice'])
+            ->with([
+                'location',
+                'documents.documentType',
+                'documents.privateFile.latestVersion',
+                'invoice.receiptAllocations' => fn ($q) => $q->whereHas('receipt', fn ($r) => $r->where('status', 'POSTED')),
+                'invoice.receiptAllocations.receipt:id,receipt_number,business_date,status,posted_at',
+                'invoices.receiptAllocations' => fn ($q) => $q->whereHas('receipt', fn ($r) => $r->where('status', 'POSTED')),
+                'invoices.receiptAllocations.receipt:id,receipt_number,business_date,status,posted_at',
+            ])
             ->orderBy('id', 'desc');
 
         if ($status = $request->query('status')) {
@@ -36,13 +44,7 @@ class CustomerBillingRequestController extends Controller
 
         $requests = $query->paginate(20);
 
-        // Append real-time estimated queue position for queued items
-        $requests->getCollection()->transform(function (BillingRequest $br) {
-            $data = $br->toArray();
-            $data['queue_position'] = $br->getQueuePosition();
-
-            return $data;
-        });
+        $requests->getCollection()->transform(fn (BillingRequest $br) => $br->withCustomerLifecyclePayload());
 
         return response()->json($requests);
     }
@@ -54,7 +56,7 @@ class CustomerBillingRequestController extends Controller
     {
         $validated = $request->validate([
             'customer_id' => 'required|integer|exists:customers,id',
-            'location_id' => 'required|integer|exists:locations,id',
+            'location_id' => 'nullable|integer|exists:locations,id',
             'service_type' => 'required|string|max:64',
             'notes' => 'nullable|string|max:1000',
         ]);
@@ -64,11 +66,15 @@ class CustomerBillingRequestController extends Controller
         $this->authorizeCustomerAccess($user, $validated['customer_id']);
 
         $customer = Customer::findOrFail($validated['customer_id']);
+        $locationId = $this->queueService->resolveBillingLocationId(
+            $user,
+            isset($validated['location_id']) ? (int) $validated['location_id'] : null
+        );
 
         $draft = $this->queueService->createDraft(
             $user,
             $customer,
-            $validated['location_id'],
+            $locationId,
             $validated['service_type'],
             $validated['notes'] ?? null
         );
@@ -90,19 +96,20 @@ class CustomerBillingRequestController extends Controller
         $billingRequest = BillingRequest::with([
             'customer',
             'location',
+            'assignedTeller:id,name,email',
             'documents.documentType',
             'documents.privateFile.latestVersion',
             'events',
-            'invoice',
+            'invoice.receiptAllocations' => fn ($q) => $q->whereHas('receipt', fn ($r) => $r->where('status', 'POSTED')),
+            'invoice.receiptAllocations.receipt:id,receipt_number,business_date,status,posted_at',
+            'invoices.receiptAllocations' => fn ($q) => $q->whereHas('receipt', fn ($r) => $r->where('status', 'POSTED')),
+            'invoices.receiptAllocations.receipt:id,receipt_number,business_date,status,posted_at',
         ])->findOrFail($id);
 
         $this->authorizeCustomerAccess($user, $billingRequest->customer_id);
 
-        $payload = $billingRequest->toArray();
-        $payload['queue_position'] = $billingRequest->getQueuePosition();
-
         return response()->json([
-            'billing_request' => $payload,
+            'billing_request' => $billingRequest->withCustomerLifecyclePayload(),
         ]);
     }
 
@@ -140,6 +147,28 @@ class CustomerBillingRequestController extends Controller
     }
 
     /**
+     * Remove an attached document from a draft or correction request.
+     */
+    public function removeDocument(Request $request, int $id, int $documentId): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $billingRequest = BillingRequest::findOrFail($id);
+        $this->authorizeCustomerAccess($user, $billingRequest->customer_id);
+
+        $this->queueService->removeDocument($billingRequest, $user, $documentId);
+
+        return response()->json([
+            'message' => 'Document removed successfully.',
+            'billing_request' => $billingRequest->fresh([
+                'documents.documentType',
+                'documents.privateFile.latestVersion',
+            ])->withCustomerLifecyclePayload(),
+        ]);
+    }
+
+    /**
      * Submit billing request for auto-admission into the teller queue.
      */
     public function submit(Request $request, int $id): JsonResponse
@@ -154,7 +183,7 @@ class CustomerBillingRequestController extends Controller
 
         return response()->json([
             'message' => "Billing request admitted to queue with Ticket #{$admitted->ticket_number}.",
-            'billing_request' => $admitted,
+            'billing_request' => $admitted->withCustomerLifecyclePayload(),
             'queue_position' => $admitted->getQueuePosition(),
         ]);
     }
@@ -182,7 +211,7 @@ class CustomerBillingRequestController extends Controller
 
         return response()->json([
             'message' => 'Billing request resubmitted successfully with original queue priority preserved.',
-            'billing_request' => $resubmitted,
+            'billing_request' => $resubmitted->withCustomerLifecyclePayload(),
             'queue_position' => $resubmitted->getQueuePosition(),
         ]);
     }
@@ -215,7 +244,7 @@ class CustomerBillingRequestController extends Controller
 
         return response()->json([
             'message' => 'Billing request cancelled successfully.',
-            'billing_request' => $billingRequest,
+            'billing_request' => $billingRequest->withCustomerLifecyclePayload(),
         ]);
     }
 

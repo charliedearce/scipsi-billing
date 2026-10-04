@@ -399,12 +399,14 @@ class TariffAndFuelSurchargeTest extends TestCase
             'customer_id' => $this->customer->id,
             'business_date' => Carbon::now()->toDateString(),
             'items' => [
-                ['tariff_code' => 'ARR_DOM', 'quantity' => '10'], // Tariff with fuel surcharge APPLICABLE
+                ['tariff_code' => 'ARR_DOM', 'quantity' => '1.5'], // Explicit zero band leaves fractional base gross unchanged.
             ],
         ]);
 
-        $this->assertEquals('0.00', $calc['items'][0]['fuel_surcharge_amount']);
-        $this->assertEquals('0.0000', $calc['items'][0]['snapshot']['fuel_surcharge_percent']);
+        $this->assertSame('0.00', $calc['items'][0]['fuel_surcharge_amount']);
+        $this->assertSame('188.25', $calc['items'][0]['gross_amount']);
+        $this->assertSame('0.00', $calc['items'][0]['ppa_amount']);
+        $this->assertSame('0.0000', $calc['items'][0]['snapshot']['fuel_surcharge_percent']);
     }
 
     /** @test */
@@ -537,7 +539,7 @@ class TariffAndFuelSurchargeTest extends TestCase
     }
 
     /** @test */
-    public function test_mixed_line_invoice_calculates_fuel_and_ppa_strictly_per_line(): void
+    public function test_fuel_bill_rounds_eligible_lines_and_suppresses_ppa_on_every_line(): void
     {
         // Seed an observation and policy
         FuelPriceObservation::query()->update(['price' => '60.0000', 'status' => 'active', 'effective_at' => now()->subYear()]);
@@ -552,14 +554,16 @@ class TariffAndFuelSurchargeTest extends TestCase
             'label' => '5% Flat',
         ]);
 
-        // Line 1: ARR_DOM (Arrastre Domestic) -> Fuel: APPLICABLE (5%), PPA: APPLICABLE (10%), VATABLE (12%)
-        // Rate: 125.50 * qty 10 = 1255.00
-        // Fuel surcharge: 1255.00 * 0.05 = 62.75
-        // PPA: 1255.00 * 0.10 = 125.50
-        // Line 2: STEV_DOM (Stevedoring Domestic) -> Fuel: NOT_APPLICABLE, PPA: APPLICABLE (10%), VATABLE (12%)
-        // Rate: 85.00 * qty 10 = 850.00
-        // Fuel surcharge: 0.00
-        // PPA: 850.00 * 0.10 = 85.00
+        $stevedoringVersion = Tariff::where('organization_id', $this->org->id)
+            ->where('tariff_code', 'STEV_DOM')
+            ->firstOrFail()
+            ->versions()
+            ->where('status', 'effective')
+            ->firstOrFail();
+        $stevedoringVersion->update([
+            'ppa_share_applicability' => 'APPLICABLE',
+            'ppa_share_rate' => '0.1000',
+        ]);
 
         $calc = $this->draftService->calculateDraft($this->org->id, [
             'customer_id' => $this->customer->id,
@@ -573,17 +577,122 @@ class TariffAndFuelSurchargeTest extends TestCase
         $items = $calc['items'];
         $this->assertCount(2, $items);
 
-        // Line 1: has fuel surcharge 62.75, PPA is 10% of gross (1255.00 + 62.75 = 1317.75) -> 131.77
-        $this->assertEquals('62.75', $items[0]['fuel_surcharge_amount']);
-        $this->assertEquals('131.77', $items[0]['ppa_amount']);
+        // Fuel gross 1255.00 * 1.05 = 1317.75 rounds to 1318.00.
+        $this->assertSame('63.00', $items[0]['fuel_surcharge_amount']);
+        $this->assertSame('1318.00', $items[0]['gross_amount']);
+        $this->assertSame('0.00', $items[0]['ppa_amount']);
+        $this->assertSame('APPLICABLE', $items[0]['snapshot']['ppa_share_applicability']);
+        $this->assertTrue($items[0]['snapshot']['calculation_payload']['ppa_suppressed_by_fuel']);
 
-        // Line 2: fuel surcharge is strictly 0.00 and PPA is 0.00 (STEV_DOM has NOT_APPLICABLE for both)
-        $this->assertEquals('0.00', $items[1]['fuel_surcharge_amount']);
-        $this->assertEquals('0.00', $items[1]['ppa_amount']);
+        // Fuel mode also suppresses PPA for the tariff that has no fuel surcharge.
+        $this->assertSame('0.00', $items[1]['fuel_surcharge_amount']);
+        $this->assertSame('0.00', $items[1]['ppa_amount']);
+        $this->assertSame('APPLICABLE', $items[1]['snapshot']['ppa_share_applicability']);
+        $this->assertTrue($items[1]['snapshot']['calculation_payload']['ppa_suppressed_by_fuel']);
 
-        // Totals reconciliation
-        $expectedTotalFuel = '62.75';
-        $this->assertEquals($expectedTotalFuel, $calc['totals']['fuel_surcharge_amount']);
+        $this->assertSame('63.00', $calc['totals']['fuel_surcharge_amount']);
+        $this->assertSame('0.00', $calc['totals']['ppa_amount']);
+
+        $withoutFuel = $this->draftService->calculateDraft($this->org->id, [
+            'customer_id' => $this->customer->id,
+            'business_date' => Carbon::now()->toDateString(),
+            'surcharge_mode' => 'NONE',
+            'items' => [
+                ['tariff_code' => 'ARR_DOM', 'quantity' => '10'],
+                ['tariff_code' => 'STEV_DOM', 'quantity' => '10'],
+            ],
+        ]);
+        $this->assertSame('125.50', $withoutFuel['items'][0]['ppa_amount']);
+        $this->assertSame('95.00', $withoutFuel['items'][1]['ppa_amount']);
+    }
+
+    public function test_fuel_draft_preserves_rate_centavos_and_rounds_final_gross_like_legacy_billing(): void
+    {
+        $tariffVersion = Tariff::where('organization_id', $this->org->id)
+            ->where('tariff_code', 'ARR_DOM')
+            ->where('service_type', 'ARRASTRE')
+            ->firstOrFail()
+            ->versions()
+            ->where('status', 'effective')
+            ->firstOrFail();
+        $tariffVersion->update([
+            'rate' => '82.3500',
+            'ppa_share_applicability' => 'NOT_APPLICABLE',
+            'ppa_share_rate' => '0.0000',
+        ]);
+        FuelPriceObservation::where('organization_id', $this->org->id)
+            ->update(['price' => '60.0000', 'status' => 'active', 'effective_at' => now()->subYear()]);
+        $policy = FuelSurchargePolicyVersion::where('organization_id', $this->org->id)->firstOrFail();
+        $policy->update(['status' => 'effective', 'effective_from' => now()->subYear()]);
+        $policy->bands()->delete();
+        FuelSurchargeBand::create([
+            'policy_version_id' => $policy->id,
+            'min_price' => '50.0000',
+            'max_price' => null,
+            'surcharge_percent' => '0.1500',
+            'label' => '15% fuel',
+        ]);
+
+        $draft = $this->draftService->createDraft($this->org->id, null, $this->teller, [
+            'customer_id' => $this->customer->id,
+            'business_date' => Carbon::now('Asia/Manila')->toDateString(),
+            'surcharge_mode' => 'FUEL',
+            ...$this->invoiceShipmentPayload($this->org->id),
+            'items' => [['tariff_version_id' => $tariffVersion->id, 'quantity' => '1.5']],
+        ]);
+
+        $item = $draft->items()->firstOrFail();
+        $this->assertSame('94.7000', (string) $item->unit_rate);
+        $this->assertSame('123.52', (string) $item->base_gross_amount);
+        $this->assertSame('18.48', (string) $item->fuel_surcharge_amount);
+        $this->assertSame('142.00', (string) $item->gross_amount);
+        $this->assertSame('17.04', (string) $item->tax_amount);
+        $this->assertSame('159.04', (string) $item->total_charge_amount);
+        $this->assertSame('142.00', (string) $draft->gross_amount);
+        $this->assertSame('82.3500', $item->pricingSnapshot->calculation_payload['input_rate']);
+        $this->assertSame('WHOLE_PESO_HALF_AWAY_FROM_ZERO', $item->pricingSnapshot->calculation_payload['fuel_gross_rounding']);
+    }
+
+    public function test_dangerous_cargo_gross_uses_unrounded_rate_then_rounds_only_to_centavos(): void
+    {
+        $tariffVersion = Tariff::where('organization_id', $this->org->id)
+            ->where('tariff_code', 'ARR_DOM')
+            ->where('service_type', 'ARRASTRE')
+            ->firstOrFail()
+            ->versions()
+            ->where('status', 'effective')
+            ->firstOrFail();
+        $tariffVersion->update([
+            'rate' => '107.2000',
+            'ppa_share_applicability' => 'NOT_APPLICABLE',
+            'ppa_share_rate' => '0.0000',
+        ]);
+
+        $data = [
+            'customer_id' => $this->customer->id,
+            'business_date' => Carbon::now('Asia/Manila')->toDateString(),
+            'surcharge_mode' => 'DANGEROUS_CARGO',
+            'dangerous_cargo_percent' => '0.9200',
+            ...$this->invoiceShipmentPayload($this->org->id),
+            'items' => [['tariff_version_id' => $tariffVersion->id, 'quantity' => '7']],
+        ];
+
+        $preview = $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/invoices/calculate', $data);
+        $preview->assertOk()
+            ->assertJsonPath('data.items.0.unit_rate', '98.6200')
+            ->assertJsonPath('data.items.0.gross_amount', '690.37')
+            ->assertJsonPath('data.items.0.tax_amount', '82.84')
+            ->assertJsonPath('data.items.0.fuel_surcharge_amount', '0.00');
+
+        $draft = $this->draftService->createDraft($this->org->id, null, $this->teller, $data);
+        $item = $draft->items()->firstOrFail();
+        $this->assertSame('98.6200', (string) $item->unit_rate);
+        $this->assertSame('690.37', (string) $item->gross_amount);
+        $this->assertSame('773.21', (string) $item->total_charge_amount);
+        $this->assertSame('107.2000', $item->pricingSnapshot->calculation_payload['input_rate']);
+        $this->assertSame('98.62400000', $item->pricingSnapshot->calculation_payload['unrounded_effective_unit_rate']);
+        $this->assertSame('CENTAVO_HALF_AWAY_FROM_ZERO', $item->pricingSnapshot->calculation_payload['dangerous_gross_rounding']);
     }
 
     /** @test */
@@ -595,6 +704,7 @@ class TariffAndFuelSurchargeTest extends TestCase
             'business_date' => Carbon::now()->toDateString(),
             'due_date' => Carbon::now()->addDays(30)->toDateString(),
             'description' => 'Original Invoice Before Policy Change',
+            ...$this->invoiceShipmentPayload($this->org->id),
             'items' => [
                 ['tariff_code' => 'ARR_DOM', 'quantity' => '10'],
             ],

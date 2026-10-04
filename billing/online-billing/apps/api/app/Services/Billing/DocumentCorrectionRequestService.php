@@ -16,8 +16,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The approval workflow deliberately does not issue fiscal replacement documents
- * or reverse money. Those execution semantics need accountant-approved rules.
+ * Request/approve workflow for issued-document corrections.
+ * Invoice linked-replacement execute lives in InvoiceCorrectionExecutionService.
+ * Receipt settlement reversal execute lives in ReceiptReversalService.
  */
 class DocumentCorrectionRequestService
 {
@@ -83,7 +84,8 @@ class DocumentCorrectionRequestService
             if ($locked->status !== DocumentCorrectionRequest::STATUS_PENDING) {
                 throw ValidationException::withMessages(['status' => ["Correction request {$locked->id} is already {$locked->status}."]]);
             }
-            if ($locked->requested_by_user_id === $actor->id) {
+            $selfReview = $locked->requested_by_user_id === $actor->id;
+            if ($selfReview && ! $actor->hasRole('Administrator')) {
                 throw ValidationException::withMessages(['reviewer' => ['The requester cannot approve or reject their own correction request.']]);
             }
 
@@ -97,8 +99,8 @@ class DocumentCorrectionRequestService
             }
 
             $locked->update(['status' => $decision, 'reviewed_by_user_id' => $actor->id, 'reviewed_at' => now(), 'decision_notes' => $notes]);
-            $this->event($locked, $actor, $decision, DocumentCorrectionRequest::STATUS_PENDING, $decision, $notes);
-            $this->audit($locked, $actor, $decision === DocumentCorrectionRequest::STATUS_APPROVED ? 'CORRECTION_APPROVED' : 'CORRECTION_REJECTED', 'corrections:approve');
+            $this->event($locked, $actor, $decision, DocumentCorrectionRequest::STATUS_PENDING, $decision, $notes, ['self_review' => $selfReview]);
+            $this->audit($locked, $actor, $decision === DocumentCorrectionRequest::STATUS_APPROVED ? 'CORRECTION_APPROVED' : 'CORRECTION_REJECTED', 'corrections:approve', ['self_review' => $selfReview]);
 
             return $locked->fresh();
         });
@@ -160,13 +162,15 @@ class DocumentCorrectionRequestService
         return DocumentRevision::where('organization_id', $organizationId)->where('document_type', $documentType)->where('document_id', $documentId)->orderByDesc('revision_number')->lockForUpdate()->firstOrFail();
     }
 
-    protected function event(DocumentCorrectionRequest $request, User $actor, string $eventType, ?string $from, string $to, string $notes): void
+    /** @param array<string, mixed> $extra */
+    protected function event(DocumentCorrectionRequest $request, User $actor, string $eventType, ?string $from, string $to, string $notes, array $extra = []): void
     {
-        DocumentCorrectionRequestEvent::create(['correction_request_id' => $request->id, 'actor_id' => $actor->id, 'event_type' => $eventType, 'from_status' => $from, 'to_status' => $to, 'notes' => $notes, 'metadata' => ['target_revision_id' => $request->target_revision_id, 'target_snapshot_hash' => $request->target_snapshot_hash]]);
+        DocumentCorrectionRequestEvent::create(['correction_request_id' => $request->id, 'actor_id' => $actor->id, 'event_type' => $eventType, 'from_status' => $from, 'to_status' => $to, 'notes' => $notes, 'metadata' => ['target_revision_id' => $request->target_revision_id, 'target_snapshot_hash' => $request->target_snapshot_hash, ...$extra]]);
     }
 
-    protected function audit(DocumentCorrectionRequest $request, User $actor, string $eventType, string $permission): void
+    /** @param array<string, mixed> $extra */
+    protected function audit(DocumentCorrectionRequest $request, User $actor, string $eventType, string $permission, array $extra = []): void
     {
-        AuditEvent::create(['organization_id' => $request->organization_id, 'location_id' => null, 'event_type' => $eventType, 'aggregate_type' => 'DOCUMENT_CORRECTION_REQUEST', 'aggregate_id' => $request->id, 'aggregate_version' => 1, 'actor_type' => 'user', 'actor_id' => $actor->id, 'permission_snapshot' => $permission, 'occurred_at' => now(), 'reason' => $request->reason, 'metadata' => ['requested_action' => $request->requested_action, 'invoice_id' => $request->invoice_id, 'receipt_id' => $request->receipt_id, 'target_revision_id' => $request->target_revision_id]]);
+        AuditEvent::create(['organization_id' => $request->organization_id, 'location_id' => null, 'event_type' => $eventType, 'aggregate_type' => 'DOCUMENT_CORRECTION_REQUEST', 'aggregate_id' => $request->id, 'aggregate_version' => 1, 'actor_type' => 'user', 'actor_id' => $actor->id, 'permission_snapshot' => $permission, 'occurred_at' => now(), 'reason' => $request->reason, 'metadata' => ['requested_action' => $request->requested_action, 'invoice_id' => $request->invoice_id, 'receipt_id' => $request->receipt_id, 'target_revision_id' => $request->target_revision_id, ...$extra]]);
     }
 }

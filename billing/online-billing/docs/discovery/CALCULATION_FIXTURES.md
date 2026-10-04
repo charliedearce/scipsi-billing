@@ -7,7 +7,7 @@ Evidence: SOURCE_REVIEWED and REFERENCE_ARITHMETIC_CHECKED. Fixtures are deliber
 Define T2(x) = truncate(x * 100) / 100, truncating toward zero.
 
 - Tariff selection (`BillingAddMod.vCargo`) depends on DOMESTIC versus other route and ARRASTRE/STEVEDORING/OTHER service type. Capture all six rate selections in the future calculator; examples here start from the chosen rate/gross.
-- Quantity base gross = quantity * rate. With no factor/zero factor, legacy resets to base gross/rate. Danger multiplies without explicit truncation in `qtyvalidate`. Fuel surcharge truncates both multiplied gross and rate to whole units. The resulting gross can differ from quantity * truncated displayed rate.
+- Quantity base gross = quantity * rate. With no factor/zero factor, legacy resets to base gross/rate. Danger multiplies without explicit truncation in `qtyvalidate`. Fuel surcharge floors its final gross to a whole peso (for example, 1.25 and 1.99 both become 1), while its rate retains the database-supported two decimal places. The resulting gross can differ from quantity multiplied by the displayed rate.
 - PPA = T2(gross * route PPA rate) when checked, otherwise 0.
 - `XXXX` discount = T2(gross * (1 - route PPA rate) * marker percentage / 100). Marker is read from unit grid column 2; percentage is from rate column 5. Multiple matches overwrite with the last match. PPA rate still affects discount even when PPA is unchecked.
 - Base net = gross - PPA. Tax = T2((base net - discount) * VAT rate) when checked. Stored UI net = base net - discount. SCIPSI = T2(T2(base net + tax) - discount) when marker exists; total charge = T2(gross + tax).
@@ -19,7 +19,7 @@ Define T2(x) = truncate(x * 100) / 100, truncating toward zero.
 
 ## Fixture coverage and limitations
 
-The 18 cases cover domestic/foreign rates, PPA/VAT switches, XXXX with/without PPA, fractional gross/truncation, danger/fuel factor differences, full receipt CITW on/off, partial cash and the F-positive-balance anomaly, statement amounts, and period 25/26/December/year change. Amounts are JSON decimal strings; dates/numbers remain strings.
+The 21 cases cover domestic/foreign rates, PPA/VAT switches, XXXX with/without PPA, fractional gross/truncation, danger/fuel factor differences including rate-centavo preservation and whole-peso gross flooring, full receipt CITW on/off, partial cash and the F-positive-balance anomaly, statement amounts, and period 25/26/December/year change. Amounts are JSON decimal strings; dates/numbers remain strings.
 
 Still required before P0-03 acceptance:
 

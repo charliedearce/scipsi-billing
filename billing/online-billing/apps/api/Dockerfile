@@ -12,8 +12,9 @@ RUN apt-get update \
         libonig-dev \
         libpng-dev \
         libjpeg62-turbo-dev \
+        freetds-dev \
     && docker-php-ext-configure gd --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" bcmath gd mbstring pcntl pdo_pgsql zip \
+    && docker-php-ext-install -j"$(nproc)" bcmath gd mbstring pcntl pdo_pgsql pdo_dblib zip \
     && pecl install redis \
     && docker-php-ext-enable redis \
     && rm -rf /var/lib/apt/lists/* /tmp/pear
@@ -32,6 +33,8 @@ RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framewor
     && chmod -R ug+rwX storage bootstrap/cache
 
 COPY docker/entrypoint.sh /usr/local/bin/scipsi-api-entrypoint
+COPY docker/uploads.ini /usr/local/etc/php/conf.d/scipsi-uploads.ini
+COPY docker/freetds.conf /etc/freetds/freetds.conf
 RUN chmod +x /usr/local/bin/scipsi-api-entrypoint
 
 ENTRYPOINT ["scipsi-api-entrypoint"]

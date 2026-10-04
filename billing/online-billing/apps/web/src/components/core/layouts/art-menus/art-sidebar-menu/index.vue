@@ -141,6 +141,7 @@
   import SidebarSubmenu from './widget/SidebarSubmenu.vue'
   import { useCommon } from '@/hooks/core/useCommon'
   import { useWindowSize, useTimeoutFn } from '@vueuse/core'
+  import type { AppRouteRecord } from '@/types/router'
 
   defineOptions({ name: 'ArtSidebarMenu' })
 
@@ -196,20 +197,13 @@
       return allMenus
     }
 
-    // 处理 iframe 路径
-    if (isIframe(route.path)) {
-      return findIframeMenuList(route.path, allMenus)
-    }
-
     // 处理一级菜单
-    if (route.meta.isFirstLevel) {
+    if (!isIframe(route.path) && route.meta.isFirstLevel) {
       return []
     }
 
-    // 返回当前顶级路径对应的子菜单
-    const currentTopPath = `/${route.path.split('/')[1]}`
-    const currentMenu = allMenus.find((menu) => menu.path === currentTopPath)
-    return currentMenu?.children ?? []
+    // 子菜单可能保留各自的绝对路径，只能按包含关系查找所属一级菜单
+    return findBranchChildren(route.path, allMenus)
   })
 
   // 双列菜单收起时的滚动条样式
@@ -245,29 +239,20 @@
   )
 
   /**
-   * 查找 iframe 对应的二级菜单列表
+   * 递归判断菜单分支下是否包含目标路径
    */
-  const findIframeMenuList = (currentPath: string, menuList: any[]) => {
-    // 递归查找包含当前路径的菜单项
-    const hasPath = (items: any[]): boolean => {
-      for (const item of items) {
-        if (item.path === currentPath) {
-          return true
-        }
-        if (item.children && hasPath(item.children)) {
-          return true
-        }
-      }
-      return false
-    }
+  const containsPath = (items: AppRouteRecord[] | undefined, targetPath: string): boolean => {
+    return (items ?? []).some(
+      (item) => item.path === targetPath || containsPath(item.children, targetPath)
+    )
+  }
 
-    // 遍历一级菜单查找匹配的子菜单
-    for (const menu of menuList) {
-      if (menu.children && hasPath(menu.children)) {
-        return menu.children
-      }
-    }
-    return []
+  /**
+   * 查找包含目标路径的一级菜单，返回其二级菜单列表
+   */
+  const findBranchChildren = (targetPath: string, menuList: AppRouteRecord[]) => {
+    const branch = menuList.find((menu) => containsPath(menu.children, targetPath))
+    return branch?.children ?? []
   }
 
   const { homePath } = useCommon()

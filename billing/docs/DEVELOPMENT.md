@@ -63,6 +63,24 @@ For a shared layout, add `ServicePrintTemplatePath` beside the OR setting:
 
 The same directory permissions, backup behavior, and DevExpress dependencies apply. Saved service layouts bind to the `Bill` and `Items` field names in `DocPrint/ServicePrintTemplateService.vb`. The default fixed-form layout uses the `QuantityLines`, `UnitLines`, `ServiceLines`, `CargoCodeLines`, `RateLines`, and `GrossLines` fields; advanced layouts may use the `BillItems` relation for repeating rows.
 
+### NSCL Service Billing template
+
+The NSCL designer uses the same service-billing data fields but saves a separate layout at:
+
+```text
+%LOCALAPPDATA%\SCIPSI Billing\Templates\ServiceBillingNSCL.repx
+```
+
+For a shared NSCL layout, add an optional application setting:
+
+```xml
+<appSettings>
+  <add key="ServiceNsclPrintTemplatePath" value="\\server\billing-templates\ServiceBillingNSCL.repx" />
+</appSettings>
+```
+
+No database setting or migration is required. At print time, any saved `tbl_item_trans.it_ccode` value whose trimmed value starts with `NSCL` selects this template before the legacy PPA print branch. Mixed invoices therefore use the NSCL layout for the whole invoice. Saving an NSCL design creates timestamped `ServiceBillingNSCL-*.repx.backup` files beside the active template.
+
 ## Build
 
 From a Visual Studio Developer PowerShell or with the full executable path:

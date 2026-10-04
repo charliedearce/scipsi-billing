@@ -23,7 +23,8 @@ class DocumentCorrectionRequest extends Model
     public const STATUS_EXECUTED = 'EXECUTED';
 
     protected $fillable = [
-        'organization_id', 'invoice_id', 'receipt_id', 'requested_action', 'status',
+        'organization_id', 'invoice_id', 'correction_draft_invoice_id', 'replacement_invoice_id',
+        'receipt_id', 'requested_action', 'status',
         'target_lock_version', 'target_revision_id', 'target_snapshot_hash', 'reason',
         'requested_by_user_id', 'requested_at', 'reviewed_by_user_id', 'reviewed_at', 'decision_notes',
     ];
@@ -41,6 +42,16 @@ class DocumentCorrectionRequest extends Model
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(Invoice::class);
+    }
+
+    public function correctionDraftInvoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class, 'correction_draft_invoice_id');
+    }
+
+    public function replacementInvoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class, 'replacement_invoice_id');
     }
 
     public function receipt(): BelongsTo

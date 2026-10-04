@@ -86,7 +86,7 @@ Primary UI: `frmBillings/frmBilling.vb`.
 4. `frmBilladd` selects service, cargo/tariff, route-sensitive rate, quantity, and optional danger/fuel-surcharge factor. `BillingAddMod.computation` reads percentages from `tbl_settings` and writes a calculated row to `tbl_item_trans`.
 5. `viewItem` treats the detail table as the source for UI totals and sums gross, PPA, discount, net, tax, and SCIPSI amounts.
 6. `saveBill` inserts the `tbl_bill_trans` header and deletes the consumed number from `tbl_bill_no`.
-7. Printing chooses `frmPrintBill` when PPA is present, otherwise `frmPrintService`, and marks `bt_indiprint='Y'` when the print form loads.
+7. Printing first checks saved item cargo codes. Any code beginning with `NSCL` uses the NSCL service template; otherwise PPA bills use `frmPrintBill` and non-PPA bills use the normal service template. Template-driven printing marks `bt_indiprint='Y'` only after a direct print request succeeds or the user accepts the printer dialog.
 
 Important: detail rows are created before the header. Header insertion and number consumption are separate commands without a transaction. An interrupted workflow can leave orphan detail rows, a stuck reservation, or a partially saved document.
 
@@ -126,6 +126,8 @@ The Admin **Settings > OR Print Designer** entry is added at runtime in `frmCont
 The default template location is `%LOCALAPPDATA%\SCIPSI Billing\Templates\OfficialReceipt.repx`. An `OrPrintTemplatePath` app setting can override it with an absolute or environment-variable-based path, including a shared UNC path. Existing templates are copied to timestamped `.repx.backup` files before replacement.
 
 `DocPrint/ServicePrintTemplateService.vb` applies the same design to the non-PPA service bill formerly printed by `frmPrintService`. It reloads the saved `tbl_bill_trans` header and `tbl_item_trans` rows, exposes stable `Bill` and `Items` tables with a `BillItems` relation, and marks `bt_indiprint='Y'` only after a print request. The Admin **Settings > Service Print Designer** entry uses sample data and stores an independent `%LOCALAPPDATA%\SCIPSI Billing\Templates\ServiceBilling.repx` template. `ServicePrintTemplatePath` may override that location.
+
+The same service print pipeline supports an independent NSCL layout at `%LOCALAPPDATA%\SCIPSI Billing\Templates\ServiceBillingNSCL.repx`. **Settings > NSCL Service Print Designer** opens that layout with NSCL sample data. At print time, a parameterized item lookup gives NSCL precedence when any trimmed `it_ccode` begins with `NSCL`, including mixed-item and historical PPA invoices. The NSCL template uses the unchanged `Bill`/`Items` binding contract; `ServiceNsclPrintTemplatePath` may override its file location.
 
 ### 4.5 Cancellation, editing, and deletion approvals
 

@@ -5,6 +5,7 @@ export type DocumentPurpose =
   | 'WITHHOLDING_CERTIFICATE'
   | 'EXEMPTION_EVIDENCE'
   | 'PAYMENT_PROOF'
+  | 'PROFILE_AVATAR'
 
 export interface DocumentTypeItem {
   id: number
@@ -159,12 +160,31 @@ export function fetchPrivateFileDetail(fileId: number) {
  * browser link would omit the bearer token, so callers must render the returned
  * blob locally rather than exposing a reusable storage URL.
  */
-export function downloadPrivateFile(fileId: number, version?: number) {
+export async function downloadPrivateFile(fileId: number, version?: number) {
   const versionPath = version ? `/${version}` : ''
 
-  return request.get<Blob>({
-    url: `/api/v1/files/${fileId}/download${versionPath}`,
-    responseType: 'blob',
-    showErrorMessage: false
-  })
+  try {
+    return await request.get<Blob>({
+      url: `/api/v1/files/${fileId}/download${versionPath}`,
+      responseType: 'blob',
+      showErrorMessage: false
+    })
+  } catch (error: any) {
+    const payload = error?.data
+    if (payload instanceof Blob) {
+      try {
+        const text = await payload.text()
+        const json = JSON.parse(text) as { message?: string; error?: { message?: string } }
+        const message = json.error?.message || json.message
+        if (message) {
+          throw new Error(message)
+        }
+      } catch (parsed) {
+        if (parsed instanceof Error && parsed.message && parsed.message !== error?.message) {
+          throw parsed
+        }
+      }
+    }
+    throw error instanceof Error ? error : new Error('Unable to download private file.')
+  }
 }

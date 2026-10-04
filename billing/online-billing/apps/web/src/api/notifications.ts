@@ -1,5 +1,7 @@
 import request from '@/utils/http'
 
+export type NotificationChannel = 'work' | 'chat' | 'all'
+
 export interface InAppNotification {
   id: number
   organization_id: number
@@ -19,11 +21,14 @@ export interface FetchNotificationsParams {
   per_page?: number
   unread_only?: boolean
   type?: string
+  /** work = transactional only (default for bell); chat = chat_message; all = both */
+  channel?: NotificationChannel
 }
 
 export interface PaginatedNotificationsResponse {
   data: InAppNotification[]
   unread_count: number
+  channel?: NotificationChannel
   meta: {
     current_page: number
     per_page: number
@@ -32,16 +37,21 @@ export interface PaginatedNotificationsResponse {
   }
 }
 
-export function fetchNotifications(params?: FetchNotificationsParams) {
+export function fetchNotifications(
+  params?: FetchNotificationsParams,
+  options?: { showErrorMessage?: boolean }
+) {
   return request.get<PaginatedNotificationsResponse>({
     url: '/api/v1/notifications',
-    params
+    params,
+    showErrorMessage: options?.showErrorMessage
   })
 }
 
-export function fetchUnreadNotificationCount() {
-  return request.get<{ unread_count: number }>({
-    url: '/api/v1/notifications/unread-count'
+export function fetchUnreadNotificationCount(channel: NotificationChannel = 'work') {
+  return request.get<{ unread_count: number; channel?: NotificationChannel }>({
+    url: '/api/v1/notifications/unread-count',
+    params: { channel }
   })
 }
 
@@ -51,8 +61,14 @@ export function markNotificationAsRead(id: number) {
   })
 }
 
-export function markAllNotificationsAsRead() {
-  return request.post<{ message: string; updated_count: number }>({
-    url: '/api/v1/notifications/read-all'
+export function markAllNotificationsAsRead(channel: NotificationChannel = 'work') {
+  return request.post<{ message: string; updated_count: number; channel?: NotificationChannel }>({
+    url: '/api/v1/notifications/read-all',
+    params: { channel },
+    data: { channel }
   })
+}
+
+export function isChatNotification(item: Pick<InAppNotification, 'type'>): boolean {
+  return item.type === 'chat_message'
 }

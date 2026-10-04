@@ -114,6 +114,28 @@ class DocumentStudioTest extends TestCase
         $this->assertStringStartsWith('%PDF-', $preview->getContent());
     }
 
+    public function test_default_sales_invoice_layout_prints_shipment_facts_without_replacing_fiscal_fields(): void
+    {
+        $layout = $this->studioService->getDefaultSalesInvoiceLayout();
+        $elements = $layout['bands']['header']['elements'];
+        $fields = array_column(array_filter($elements, fn ($element) => ($element['type'] ?? null) === 'bound_text'), 'field');
+        $labels = array_column(array_filter($elements, fn ($element) => ($element['type'] ?? null) === 'static_text'), 'text');
+
+        $this->assertSame(68, $layout['bands']['header']['height_mm']);
+        foreach (['shipment.vessel_name', 'shipment.voyage', 'shipment.movement', 'shipment.route', 'shipment.notes', 'buyer.tin', 'buyer.registered_name', 'invoice.invoice_number'] as $field) {
+            $this->assertContains($field, $fields);
+        }
+        $this->assertContains('SALES INVOICE', $labels);
+        $this->assertNotContains('totals.vat_amount', $fields);
+
+        $summaryFields = array_column(
+            array_filter($layout['bands']['summary']['elements'], fn ($element) => ($element['type'] ?? null) === 'bound_text'),
+            'field'
+        );
+        $this->assertContains('totals.vat_amount', $summaryFields);
+        $this->assertContains('totals.total_amount_due', $summaryFields);
+    }
+
     public function test_can_update_draft_version_layout(): void
     {
         $template = DocumentTemplate::create([
@@ -287,6 +309,53 @@ class DocumentStudioTest extends TestCase
         $base64 = $jsonRes->json('data.pdf_base64');
         $decoded = base64_decode($base64);
         $this->assertStringStartsWith('%PDF-', $decoded);
+    }
+
+    public function test_draft_preview_can_render_an_unsaved_layout_without_storing_it(): void
+    {
+        $template = DocumentTemplate::create([
+            'organization_id' => $this->org->id,
+            'document_kind' => 'SERVICE',
+            'code' => 'SI-LIVE-PREVIEW-TEST',
+            'name' => 'Live Preview Test',
+        ]);
+        $draft = $this->studioService->createDraftVersion($template, $this->admin, $this->studioService->getDefaultSalesInvoiceLayout());
+        $storedCount = count($draft->layout_definition['bands']['header']['elements']);
+
+        $override = $draft->layout_definition;
+        $override['bands']['header']['elements'][] = [
+            'type' => 'static_text',
+            'text' => 'Live preview marker',
+            'x_mm' => 0,
+            'y_mm' => 40,
+            'width_mm' => 80,
+            'height_mm' => 6,
+        ];
+
+        $live = $this->actingAs($this->admin, 'sanctum')
+            ->postJson("/api/v1/admin/document-studio/templates/{$template->id}/versions/{$draft->id}/preview?format=base64", [
+                'layout_definition' => $override,
+            ]);
+        $live->assertOk();
+        $this->assertStringStartsWith('%PDF-', base64_decode((string) $live->json('data.pdf_base64')));
+
+        $draft->refresh();
+        $this->assertCount($storedCount, $draft->layout_definition['bands']['header']['elements']);
+
+        $invalid = $override;
+        $invalid['bands']['header']['elements'][] = ['type' => 'script'];
+        $this->actingAs($this->admin, 'sanctum')
+            ->postJson("/api/v1/admin/document-studio/templates/{$template->id}/versions/{$draft->id}/preview", [
+                'layout_definition' => $invalid,
+            ])
+            ->assertStatus(422);
+
+        $published = DocumentTemplate::where('code', 'SI-SERVICE-DEFAULT')->first()->publishedVersion;
+        $this->actingAs($this->admin, 'sanctum')
+            ->postJson("/api/v1/admin/document-studio/templates/{$published->template_id}/versions/{$published->id}/preview", [
+                'layout_definition' => $invalid,
+            ])
+            ->assertOk();
     }
 
     public function test_resolves_active_template_with_hierarchy(): void

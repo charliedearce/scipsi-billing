@@ -12,13 +12,17 @@ class NotificationController extends Controller
 {
     /**
      * List in-app notifications for the authenticated user.
+     *
+     * Query: channel=work|chat|all (default all for compatibility; portal UI uses work).
      */
     public function index(Request $request): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
+        $channel = $this->resolvedChannel($request);
 
-        $query = InAppNotification::where('user_id', $user->id);
+        $query = InAppNotification::where('user_id', $user->id)
+            ->forChannel($channel);
 
         if ($request->boolean('unread_only')) {
             $query->unread();
@@ -31,11 +35,15 @@ class NotificationController extends Controller
         $notifications = $query->orderByDesc('created_at')
             ->paginate($request->integer('per_page', 20));
 
-        $unreadCount = InAppNotification::where('user_id', $user->id)->unread()->count();
+        $unreadCount = InAppNotification::where('user_id', $user->id)
+            ->forChannel($channel)
+            ->unread()
+            ->count();
 
         return response()->json([
             'data' => $notifications->items(),
             'unread_count' => $unreadCount,
+            'channel' => $channel,
             'meta' => [
                 'current_page' => $notifications->currentPage(),
                 'per_page' => $notifications->perPage(),
@@ -47,16 +55,22 @@ class NotificationController extends Controller
 
     /**
      * Fast unread notification count.
+     * Query: channel=work|chat|all (portal bell uses work).
      */
     public function unreadCount(Request $request): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
+        $channel = $this->resolvedChannel($request);
 
-        $count = InAppNotification::where('user_id', $user->id)->unread()->count();
+        $count = InAppNotification::where('user_id', $user->id)
+            ->forChannel($channel)
+            ->unread()
+            ->count();
 
         return response()->json([
             'unread_count' => $count,
+            'channel' => $channel,
         ]);
     }
 
@@ -84,14 +98,17 @@ class NotificationController extends Controller
     }
 
     /**
-     * Mark all notifications for the user as read.
+     * Mark notifications as read.
+     * Body/query: channel=work|chat|all — work leaves chat_message rows for conversation focus.
      */
     public function markAllRead(Request $request): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
+        $channel = $this->resolvedChannel($request);
 
         $updatedCount = InAppNotification::where('user_id', $user->id)
+            ->forChannel($channel)
             ->unread()
             ->update([
                 'is_read' => true,
@@ -101,6 +118,22 @@ class NotificationController extends Controller
         return response()->json([
             'message' => "All {$updatedCount} notifications marked as read.",
             'updated_count' => $updatedCount,
+            'channel' => $channel,
         ]);
+    }
+
+    protected function resolvedChannel(Request $request): string
+    {
+        $channel = strtolower((string) (
+            $request->input('channel')
+            ?? $request->query('channel')
+            ?? InAppNotification::CHANNEL_ALL
+        ));
+
+        return in_array($channel, [
+            InAppNotification::CHANNEL_WORK,
+            InAppNotification::CHANNEL_CHAT,
+            InAppNotification::CHANNEL_ALL,
+        ], true) ? $channel : InAppNotification::CHANNEL_ALL;
     }
 }

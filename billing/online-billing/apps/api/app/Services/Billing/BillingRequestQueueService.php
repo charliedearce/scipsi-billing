@@ -6,15 +6,21 @@ use App\Events\DataRefreshEvent;
 use App\Models\BillingRequest;
 use App\Models\BillingRequestDocument;
 use App\Models\BillingRequestEvent;
+use App\Models\BillingRequestInvoice;
 use App\Models\Customer;
 use App\Models\DocumentRequirement;
-use App\Models\InAppNotification;
+use App\Models\DocumentType;
 use App\Models\Invoice;
+use App\Models\Location;
 use App\Models\NotificationEvent;
 use App\Models\PrivateFile;
 use App\Models\QueueTicket;
 use App\Models\User;
+use App\Services\Audit\DocumentRevisionService;
+use App\Services\Communications\ConversationService;
+use App\Services\Notifications\InAppNotificationPublisher;
 use App\Services\Sms\SmsDeliveryOrchestrator;
+use App\Support\SafeBroadcast;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -23,8 +29,89 @@ use Illuminate\Validation\ValidationException;
 class BillingRequestQueueService
 {
     public function __construct(
-        protected SmsDeliveryOrchestrator $smsOrchestrator
+        protected SmsDeliveryOrchestrator $smsOrchestrator,
+        protected DocumentRevisionService $revisionService,
+        protected InAppNotificationPublisher $notifications,
+        protected ConversationService $conversations,
     ) {}
+
+    /**
+     * Resolve the branch for a customer billing request.
+     *
+     * Preference order: explicit request (must belong to the org), the user's
+     * primary/sole membership, then the organization's sole active location
+     * (single-branch deployments). When falling back to the org sole location,
+     * attach it as the user's primary membership so later portal calls see it.
+     */
+    public function resolveBillingLocationId(User $actor, ?int $requestedLocationId = null): int
+    {
+        $organizationId = (int) $actor->organization_id;
+
+        if ($requestedLocationId) {
+            $requested = Location::query()
+                ->where('organization_id', $organizationId)
+                ->where('id', $requestedLocationId)
+                ->where('is_active', true)
+                ->first();
+
+            if (! $requested) {
+                throw ValidationException::withMessages([
+                    'location_id' => 'The selected branch is not available for this organization.',
+                ]);
+            }
+
+            $membershipIds = $actor->locations()->pluck('locations.id');
+            if ($membershipIds->isNotEmpty() && ! $membershipIds->contains($requested->id)) {
+                throw ValidationException::withMessages([
+                    'location_id' => 'You are not assigned to the selected branch.',
+                ]);
+            }
+
+            if ($membershipIds->isEmpty()) {
+                $actor->locations()->syncWithoutDetaching([
+                    $requested->id => ['is_primary' => true],
+                ]);
+            }
+
+            return (int) $requested->id;
+        }
+
+        $memberships = $actor->locations()
+            ->where('locations.is_active', true)
+            ->get();
+
+        if ($memberships->count() === 1) {
+            return (int) $memberships->first()->id;
+        }
+
+        if ($memberships->count() > 1) {
+            $primary = $memberships->first(fn (Location $location) => (bool) $location->pivot?->is_primary)
+                ?? $memberships->first();
+
+            return (int) $primary->id;
+        }
+
+        $orgLocations = Location::query()
+            ->where('organization_id', $organizationId)
+            ->where('is_active', true)
+            ->orderBy('id')
+            ->get();
+
+        if ($orgLocations->count() === 1) {
+            $sole = $orgLocations->first();
+            $actor->locations()->syncWithoutDetaching([
+                $sole->id => ['is_primary' => true],
+            ]);
+
+            return (int) $sole->id;
+        }
+
+        throw ValidationException::withMessages([
+            'location_id' => $orgLocations->isEmpty()
+                ? 'No active branch exists for this organization. Ask Admin to create a location.'
+                : 'Multiple branches exist and none is assigned to this portal user. Ask Admin to assign a location.',
+        ]);
+    }
 
     /**
      * Create a new billing request draft.
@@ -97,23 +184,79 @@ class BillingRequestQueueService
             ]);
         }
 
-        return DB::transaction(function () use ($request, $documentTypeId, $privateFileId, $requirementId, $customerNotes, $latestVersion) {
-            $doc = BillingRequestDocument::updateOrCreate(
-                [
-                    'billing_request_id' => $request->id,
-                    'document_type_id' => $documentTypeId,
-                ],
-                [
-                    'document_requirement_id' => $requirementId,
-                    'private_file_id' => $privateFileId,
-                    'reviewed_version_number' => $latestVersion->version_number,
-                    'review_status' => BillingRequestDocument::STATUS_PENDING,
-                    'rejection_reason' => null,
-                    'customer_notes' => $customerNotes,
-                ]
-            );
+        $documentType = DocumentType::where('organization_id', $request->organization_id)
+            ->findOrFail($documentTypeId);
+        $maxFiles = max(1, (int) ($documentType->max_files ?: 1));
+
+        return DB::transaction(function () use ($request, $documentTypeId, $privateFileId, $requirementId, $customerNotes, $latestVersion, $maxFiles) {
+            $existingSameFile = BillingRequestDocument::where('billing_request_id', $request->id)
+                ->where('private_file_id', $privateFileId)
+                ->first();
+            if ($existingSameFile) {
+                return $existingSameFile->load(['documentType', 'privateFile']);
+            }
+
+            $currentCount = BillingRequestDocument::where('billing_request_id', $request->id)
+                ->where('document_type_id', $documentTypeId)
+                ->count();
+
+            if ($currentCount >= $maxFiles) {
+                throw ValidationException::withMessages([
+                    'private_file_id' => "At most {$maxFiles} file(s) are allowed for this document type.",
+                ]);
+            }
+
+            $doc = BillingRequestDocument::create([
+                'billing_request_id' => $request->id,
+                'document_type_id' => $documentTypeId,
+                'document_requirement_id' => $requirementId,
+                'private_file_id' => $privateFileId,
+                'reviewed_version_number' => $latestVersion->version_number,
+                'review_status' => BillingRequestDocument::STATUS_PENDING,
+                'rejection_reason' => null,
+                'customer_notes' => $customerNotes,
+            ]);
 
             return $doc->load(['documentType', 'privateFile']);
+        });
+    }
+
+    /**
+     * Detach a document from a draft or correction request (link only; private file retained).
+     */
+    public function removeDocument(
+        BillingRequest $request,
+        User $actor,
+        int $documentId
+    ): void {
+        if (! in_array($request->status, [BillingRequest::STATUS_DRAFT, BillingRequest::STATUS_NEEDS_CORRECTION], true)) {
+            throw ValidationException::withMessages([
+                'status' => "Cannot remove documents when request is in status {$request->status}.",
+            ]);
+        }
+
+        $doc = BillingRequestDocument::where('billing_request_id', $request->id)
+            ->whereKey($documentId)
+            ->firstOrFail();
+
+        DB::transaction(function () use ($request, $actor, $doc) {
+            $metadata = [
+                'billing_request_document_id' => $doc->id,
+                'document_type_id' => $doc->document_type_id,
+                'private_file_id' => $doc->private_file_id,
+            ];
+            $doc->delete();
+
+            BillingRequestEvent::create([
+                'billing_request_id' => $request->id,
+                'actor_id' => $actor->id,
+                'event_type' => 'DOCUMENT_REMOVED',
+                'from_status' => $request->status,
+                'to_status' => $request->status,
+                'notes' => 'Customer removed an attached document',
+                'metadata' => $metadata,
+                'created_at' => Carbon::now(),
+            ]);
         });
     }
 
@@ -140,19 +283,24 @@ class BillingRequestQueueService
             ->with('documentType')
             ->get();
 
-        $attachedDocs = $request->documents()->with('privateFile.latestVersion')->get()->keyBy('document_type_id');
+        $attachedDocs = $request->documents()->with('privateFile.latestVersion')->get()->groupBy('document_type_id');
         $missingRequirements = [];
 
         foreach ($requirements as $req) {
-            $attached = $attachedDocs->get($req->document_type_id);
-            if (! $attached) {
+            $attachedGroup = $attachedDocs->get($req->document_type_id) ?? collect();
+            if ($attachedGroup->isEmpty()) {
                 $missingRequirements[] = $req->documentType->name ?? "Doc Type ID {$req->document_type_id}";
 
                 continue;
             }
 
-            $version = $attached->privateFile?->latestVersion;
-            if (! $version || $version->scan_status !== 'CLEAN') {
+            $hasClean = $attachedGroup->contains(function ($attached) {
+                $version = $attached->privateFile?->latestVersion;
+
+                return $version && $version->scan_status === 'CLEAN';
+            });
+
+            if (! $hasClean) {
                 $missingRequirements[] = "{$req->documentType->name} (file quarantined or unverified)";
             }
         }
@@ -201,20 +349,19 @@ class BillingRequestQueueService
                 'created_at' => $now,
             ]);
 
-            // 4. In-App Notification to Customer
-            InAppNotification::create([
-                'organization_id' => $request->organization_id,
-                'user_id' => $request->created_by_user_id,
-                'type' => 'QUEUE',
-                'title' => 'Billing Request Admitted',
-                'body' => "Your billing request {$request->transaction_no} has been queued with ticket #{$ticketNumber}.",
-                'data' => [
+            // 4. In-App Notification to Customer (durable + Reverb wake-up)
+            $this->notifications->publish(
+                (int) $request->organization_id,
+                (int) $request->created_by_user_id,
+                'QUEUE',
+                'Billing Request Admitted',
+                "Your billing request {$request->transaction_no} has been queued with ticket #{$ticketNumber}.",
+                [
                     'billing_request_id' => $request->id,
                     'transaction_no' => $request->transaction_no,
                     'ticket_number' => $ticketNumber,
                 ],
-                'is_read' => false,
-            ]);
+            );
 
             // 5. Outbound Transactional SMS Intent (Decision W31)
             $this->dispatchTransactionalNotice(
@@ -229,13 +376,7 @@ class BillingRequestQueueService
             );
 
             // 6. Realtime Refresh Broadcast
-            broadcast(new DataRefreshEvent(
-                $request->organization_id,
-                'queue',
-                'billing_request',
-                $request->id,
-                'queued'
-            ));
+            $this->broadcastQueueRefresh($request, 'queued');
 
             return $request->fresh(['customer', 'location', 'documents.documentType']);
         });
@@ -292,13 +433,9 @@ class BillingRequestQueueService
                 'created_at' => $now,
             ]);
 
-            broadcast(new DataRefreshEvent(
-                $request->organization_id,
-                'queue',
-                'billing_request',
-                $request->id,
-                'claimed'
-            ));
+            $this->conversations->findOrCreateForBillingRequest($request, $teller);
+
+            $this->broadcastQueueRefresh($request, 'claimed');
 
             return $request->fresh(['customer', 'location', 'documents.documentType', 'documents.privateFile.latestVersion']);
         });
@@ -384,28 +521,21 @@ class BillingRequestQueueService
                 'created_at' => $now,
             ]);
 
-            // Notify Customer
-            InAppNotification::create([
-                'organization_id' => $request->organization_id,
-                'user_id' => $request->created_by_user_id,
-                'type' => 'QUEUE',
-                'title' => 'Document Correction Required',
-                'body' => "Your request {$request->transaction_no} requires correction: {$correctionNotes}",
-                'data' => [
+            // Notify Customer (durable + Reverb wake-up)
+            $this->notifications->publish(
+                (int) $request->organization_id,
+                (int) $request->created_by_user_id,
+                'QUEUE',
+                'Document Correction Required',
+                "Your request {$request->transaction_no} requires correction: {$correctionNotes}",
+                [
                     'billing_request_id' => $request->id,
                     'transaction_no' => $request->transaction_no,
                     'correction_notes' => $correctionNotes,
                 ],
-                'is_read' => false,
-            ]);
+            );
 
-            broadcast(new DataRefreshEvent(
-                $request->organization_id,
-                'queue',
-                'billing_request',
-                $request->id,
-                'correction_requested'
-            ));
+            $this->broadcastQueueRefresh($request, 'correction_requested');
 
             // Outbound Transactional SMS Intent (Decision W31)
             $this->dispatchTransactionalNotice(
@@ -488,13 +618,7 @@ class BillingRequestQueueService
                 'created_at' => $now,
             ]);
 
-            broadcast(new DataRefreshEvent(
-                $request->organization_id,
-                'queue',
-                'billing_request',
-                $request->id,
-                'resubmitted'
-            ));
+            $this->broadcastQueueRefresh($request, 'resubmitted');
 
             return $request->fresh(['customer', 'location', 'documents.documentType']);
         });
@@ -502,6 +626,7 @@ class BillingRequestQueueService
 
     /**
      * Teller accepts documents and prepares an invoice draft for the request.
+     * After a posted bill with complete=false, the same claim may prepare another draft.
      */
     public function prepareBillingDraft(BillingRequest $request, User $teller): Invoice
     {
@@ -511,16 +636,48 @@ class BillingRequestQueueService
             ]);
         }
 
-        if ($request->draft_invoice_id) {
-            $existingDraft = Invoice::find($request->draft_invoice_id);
-            if ($existingDraft && $existingDraft->status === 'DRAFT') {
-                return $existingDraft;
-            }
+        $allowedStatuses = [
+            BillingRequest::STATUS_IN_REVIEW,
+            BillingRequest::STATUS_BILLING_IN_PROGRESS,
+            BillingRequest::STATUS_BILL_READY,
+        ];
+        if (! in_array($request->status, $allowedStatuses, true)) {
+            throw ValidationException::withMessages([
+                'status' => "Cannot prepare a draft while the request is in {$request->status}.",
+            ]);
         }
 
         return DB::transaction(function () use ($request, $teller) {
+            $documents = $request->documents()
+                ->with('privateFile.latestVersion')
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($documents as $document) {
+                if ($document->review_status !== BillingRequestDocument::STATUS_PENDING) {
+                    continue;
+                }
+
+                $document->update([
+                    'review_status' => BillingRequestDocument::STATUS_ACCEPTED,
+                    'reviewed_version_number' => $document->privateFile?->latestVersion?->version_number,
+                    'rejection_reason' => null,
+                ]);
+            }
+
+            if ($request->draft_invoice_id) {
+                $existingDraft = Invoice::find($request->draft_invoice_id);
+                if ($existingDraft && $existingDraft->status === 'DRAFT') {
+                    return $existingDraft;
+                }
+            }
+
             $customer = $request->customer;
             $buyerProfileVersion = $customer->buyerProfile?->currentVersion();
+            $linkedCount = BillingRequestInvoice::where('billing_request_id', $request->id)->count();
+            $draftLabel = $linkedCount > 0
+                ? "Additional invoice draft from Billing Request {$request->transaction_no}"
+                : "Generated from Billing Request {$request->transaction_no}";
 
             $invoice = Invoice::create([
                 'organization_id' => $request->organization_id,
@@ -528,7 +685,7 @@ class BillingRequestQueueService
                 'customer_id' => $request->customer_id,
                 'buyer_profile_version_id' => $buyerProfileVersion?->id,
                 'status' => 'DRAFT',
-                'business_date' => Carbon::now()->toDateString(),
+                'business_date' => Carbon::now('Asia/Manila')->toDateString(),
                 'currency' => 'PHP',
                 'base_gross_amount' => '0.00',
                 'fuel_surcharge_amount' => '0.00',
@@ -538,10 +695,25 @@ class BillingRequestQueueService
                 'net_amount' => '0.00',
                 'tax_amount' => '0.00',
                 'total_charge_amount' => '0.00',
-                'notes' => "Generated from Billing Request {$request->transaction_no}",
+                'notes' => $draftLabel,
+                'lock_version' => 1,
                 'created_by_user_id' => $teller->id,
             ]);
 
+            $this->revisionService->createRevision(
+                organizationId: $invoice->organization_id,
+                locationId: $invoice->location_id,
+                documentType: 'INVOICE',
+                documentId: $invoice->id,
+                actor: $teller,
+                newSnapshot: $invoice->load(['items.pricingSnapshot', 'customer', 'buyerProfileVersion'])->toArray(),
+                reason: $linkedCount > 0
+                    ? "Additional invoice draft from billing request {$request->transaction_no}"
+                    : "Initial invoice draft from billing request {$request->transaction_no}",
+                expectedVersion: 1
+            );
+
+            $fromStatus = $request->status;
             $request->update([
                 'draft_invoice_id' => $invoice->id,
                 'status' => BillingRequest::STATUS_BILLING_IN_PROGRESS,
@@ -551,31 +723,34 @@ class BillingRequestQueueService
                 'billing_request_id' => $request->id,
                 'actor_id' => $teller->id,
                 'event_type' => 'DRAFT_PREPARED',
-                'from_status' => BillingRequest::STATUS_IN_REVIEW,
+                'from_status' => $fromStatus,
                 'to_status' => BillingRequest::STATUS_BILLING_IN_PROGRESS,
                 'notes' => "Invoice draft #{$invoice->id} initialized",
-                'metadata' => ['invoice_id' => $invoice->id],
+                'metadata' => [
+                    'invoice_id' => $invoice->id,
+                    'sequence' => $linkedCount + 1,
+                ],
                 'created_at' => Carbon::now(),
             ]);
 
-            broadcast(new DataRefreshEvent(
-                $request->organization_id,
-                'queue',
-                'billing_request',
-                $request->id,
-                'draft_prepared'
-            ));
+            $this->broadcastQueueRefresh($request, 'draft_prepared');
 
             return $invoice;
         });
     }
 
     /**
-     * Mark billing request as complete and bill-ready upon invoice posting.
-     * Guaranteed idempotent: retries never post duplicate invoices or notifications.
+     * Link a posted invoice to the billing request and mark bill-ready.
+     * First linked invoice sets BILL_READY. When $complete is false the teller keeps the claim
+     * so additional drafts/posts can be prepared under the same ticket. When true, assignment is released.
+     * Guaranteed idempotent for the same invoice_id: retries never post duplicate notifications.
      */
-    public function completeBillReady(BillingRequest $request, Invoice $invoice, User $teller): BillingRequest
-    {
+    public function completeBillReady(
+        BillingRequest $request,
+        Invoice $invoice,
+        User $teller,
+        bool $complete = true
+    ): BillingRequest {
         if ($invoice->customer_id !== $request->customer_id) {
             throw ValidationException::withMessages([
                 'invoice' => 'Invoice customer does not match the billing request customer.',
@@ -588,74 +763,171 @@ class BillingRequestQueueService
             ]);
         }
 
-        // Idempotency: if already BILL_READY and linked to this invoice, return safely
-        if ($request->status === BillingRequest::STATUS_BILL_READY && $request->invoice_id === $invoice->id) {
-            return $request;
+        $alreadyLinked = BillingRequestInvoice::where('billing_request_id', $request->id)
+            ->where('invoice_id', $invoice->id)
+            ->exists();
+
+        // Idempotency: same invoice already linked and request already BILL_READY
+        if ($alreadyLinked && $request->status === BillingRequest::STATUS_BILL_READY) {
+            if ($complete && $request->assigned_to_user_id !== null) {
+                return DB::transaction(function () use ($request, $invoice, $teller) {
+                    return $this->releaseClaimAfterBillReady($request, $invoice, $teller);
+                });
+            }
+
+            return $request->fresh(['customer', 'location', 'invoice', 'invoices']);
         }
 
-        return DB::transaction(function () use ($request, $invoice, $teller) {
-            $now = Carbon::now();
-
-            $request->update([
-                'status' => BillingRequest::STATUS_BILL_READY,
-                'invoice_id' => $invoice->id,
+        if ($request->assigned_to_user_id !== null && $request->assigned_to_user_id !== $teller->id) {
+            throw ValidationException::withMessages([
+                'assignment' => 'Only the assigned teller can mark this request bill-ready.',
             ]);
+        }
+
+        return DB::transaction(function () use ($request, $invoice, $teller, $complete, $alreadyLinked) {
+            $now = Carbon::now();
+            $fromStatus = $request->status;
+            $isFirstInvoice = ! BillingRequestInvoice::where('billing_request_id', $request->id)->exists();
+
+            if (! $alreadyLinked) {
+                $otherOwner = BillingRequestInvoice::where('invoice_id', $invoice->id)->first();
+                if ($otherOwner && (int) $otherOwner->billing_request_id !== (int) $request->id) {
+                    throw ValidationException::withMessages([
+                        'invoice' => 'This invoice is already linked to another billing request.',
+                    ]);
+                }
+
+                BillingRequestInvoice::create([
+                    'billing_request_id' => $request->id,
+                    'invoice_id' => $invoice->id,
+                    'linked_by_user_id' => $teller->id,
+                    'linked_at' => $now,
+                ]);
+            }
+
+            $updates = [
+                'status' => BillingRequest::STATUS_BILL_READY,
+                // Keep legacy singular FK as primary / first ready bill.
+                'invoice_id' => $request->invoice_id ?: $invoice->id,
+                'draft_invoice_id' => null,
+            ];
+
+            if ($complete) {
+                $updates['assigned_to_user_id'] = null;
+                $updates['assigned_at'] = null;
+                $updates['assignment_heartbeat_at'] = null;
+            }
+
+            $request->update($updates);
+
+            $eventType = $isFirstInvoice ? 'BILL_READY' : 'INVOICE_LINKED';
+            $notes = $isFirstInvoice
+                ? ($complete
+                    ? "Official invoice {$invoice->invoice_number} ready for customer; teller assignment released for queue tracking"
+                    : "Official invoice {$invoice->invoice_number} ready for customer; teller keeps claim for additional bills")
+                : ($complete
+                    ? "Additional invoice {$invoice->invoice_number} linked; teller assignment released"
+                    : "Additional invoice {$invoice->invoice_number} linked; teller keeps claim for more bills");
 
             BillingRequestEvent::create([
                 'billing_request_id' => $request->id,
                 'actor_id' => $teller->id,
-                'event_type' => 'BILL_READY',
-                'from_status' => $request->status,
+                'event_type' => $eventType,
+                'from_status' => $fromStatus,
                 'to_status' => BillingRequest::STATUS_BILL_READY,
-                'notes' => "Official invoice {$invoice->invoice_number} ready for customer",
+                'notes' => $notes,
                 'metadata' => [
                     'invoice_id' => $invoice->id,
                     'invoice_number' => $invoice->invoice_number,
+                    'completed_by_user_id' => $teller->id,
+                    'completed_by_name' => $teller->name,
+                    'assignment_released' => $complete,
+                    'complete' => $complete,
+                    'is_first_invoice' => $isFirstInvoice,
                 ],
                 'created_at' => $now,
             ]);
 
-            // In-app notification
-            InAppNotification::create([
-                'organization_id' => $request->organization_id,
-                'user_id' => $request->created_by_user_id,
-                'type' => 'INVOICE',
-                'title' => 'Invoice Ready',
-                'body' => "Your official invoice {$invoice->invoice_number} is ready for viewing and payment.",
-                'data' => [
-                    'billing_request_id' => $request->id,
-                    'invoice_id' => $invoice->id,
-                    'invoice_number' => $invoice->invoice_number,
-                ],
-                'is_read' => false,
-            ]);
+            if (! $alreadyLinked) {
+                $this->notifications->publish(
+                    (int) $request->organization_id,
+                    (int) $request->created_by_user_id,
+                    'INVOICE',
+                    'Invoice Ready',
+                    "Your official invoice {$invoice->invoice_number} is ready for viewing and payment.",
+                    [
+                        'billing_request_id' => $request->id,
+                        'invoice_id' => $invoice->id,
+                        'invoice_number' => $invoice->invoice_number,
+                    ],
+                );
 
-            // Transactional SMS notice (Decision W31)
-            $this->dispatchTransactionalNotice(
-                $request,
-                'INVOICE_ARTIFACT_READY',
-                [
-                    'recipient_name' => $request->customer->name,
-                    'reference_no' => $invoice->invoice_number,
-                    'org_name' => $request->organization?->name ?? 'SCIPSI',
-                ]
-            );
+                $this->dispatchTransactionalNotice(
+                    $request,
+                    'INVOICE_ARTIFACT_READY',
+                    [
+                        'recipient_name' => $request->customer->name,
+                        'reference_no' => $invoice->invoice_number,
+                        'org_name' => $request->organization?->name ?? 'SCIPSI',
+                    ]
+                );
+            }
 
-            broadcast(new DataRefreshEvent(
-                $request->organization_id,
-                'queue',
-                'billing_request',
-                $request->id,
-                'bill_ready'
-            ));
+            $this->broadcastQueueRefresh($request, $isFirstInvoice ? 'bill_ready' : 'invoice_linked');
 
-            return $request->fresh(['customer', 'location', 'invoice']);
+            return $request->fresh(['customer', 'location', 'invoice', 'invoices']);
         });
     }
 
     /**
-     * Release teller assignment back to the queue (e.g. teller stepping away).
-     * Original queue priority is completely preserved.
+     * Finish multi-bill work: release assignment while staying BILL_READY.
+     */
+    protected function releaseClaimAfterBillReady(
+        BillingRequest $request,
+        Invoice $invoice,
+        User $teller
+    ): BillingRequest {
+        if ($request->assigned_to_user_id !== null && $request->assigned_to_user_id !== $teller->id) {
+            throw ValidationException::withMessages([
+                'assignment' => 'Only the assigned teller can finish this request.',
+            ]);
+        }
+
+        $now = Carbon::now();
+        $fromStatus = $request->status;
+
+        $request->update([
+            'assigned_to_user_id' => null,
+            'assigned_at' => null,
+            'assignment_heartbeat_at' => null,
+            'draft_invoice_id' => null,
+        ]);
+
+        BillingRequestEvent::create([
+            'billing_request_id' => $request->id,
+            'actor_id' => $teller->id,
+            'event_type' => 'ASSIGNMENT_RELEASED',
+            'from_status' => $fromStatus,
+            'to_status' => BillingRequest::STATUS_BILL_READY,
+            'notes' => 'Teller finished multi-bill work; assignment released for queue tracking',
+            'metadata' => [
+                'invoice_id' => $invoice->id,
+                'invoice_number' => $invoice->invoice_number,
+                'completed_by_user_id' => $teller->id,
+                'assignment_released' => true,
+                'complete' => true,
+            ],
+            'created_at' => $now,
+        ]);
+
+        $this->broadcastQueueRefresh($request, 'bill_ready_finished');
+
+        return $request->fresh(['customer', 'location', 'invoice', 'invoices']);
+    }
+
+    /**
+     * Release teller assignment back to the queue (e.g. teller stepping away to process others).
+     * Original queue priority is completely preserved. This is not a rejection or cancellation.
      */
     public function releaseAssignment(BillingRequest $request, User $teller, ?string $reason = null): BillingRequest
     {
@@ -665,11 +937,125 @@ class BillingRequestQueueService
             ]);
         }
 
+        if (! in_array($request->status, [
+            BillingRequest::STATUS_IN_REVIEW,
+            BillingRequest::STATUS_BILLING_IN_PROGRESS,
+            BillingRequest::STATUS_BILL_READY,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'status' => "Cannot release a request that is currently in {$request->status}.",
+            ]);
+        }
+
         return DB::transaction(function () use ($request, $teller, $reason) {
             $now = Carbon::now();
+            $fromStatus = $request->status;
+            $hasPostedLinks = BillingRequestInvoice::where('billing_request_id', $request->id)->exists()
+                || $request->invoice_id;
+            // Multi-bill: if invoices already linked, stay BILL_READY and only drop the claim.
+            $toStatus = $hasPostedLinks
+                ? BillingRequest::STATUS_BILL_READY
+                : BillingRequest::STATUS_QUEUED;
+
+            if ($request->draft_invoice_id && $hasPostedLinks) {
+                $draft = Invoice::whereKey($request->draft_invoice_id)->lockForUpdate()->first();
+                if ($draft && $draft->status === 'DRAFT') {
+                    $draft->update([
+                        'status' => 'CANCELLED',
+                        'notes' => trim(($draft->notes ? $draft->notes."\n" : '').'Abandoned: teller released multi-bill claim.'),
+                    ]);
+                }
+            }
 
             $request->update([
-                'status' => BillingRequest::STATUS_QUEUED,
+                'status' => $toStatus,
+                'assigned_to_user_id' => null,
+                'assigned_at' => null,
+                'assignment_heartbeat_at' => null,
+                'draft_invoice_id' => $hasPostedLinks ? null : $request->draft_invoice_id,
+            ]);
+
+            BillingRequestEvent::create([
+                'billing_request_id' => $request->id,
+                'actor_id' => $teller->id,
+                'event_type' => 'RELEASED',
+                'from_status' => $fromStatus,
+                'to_status' => $toStatus,
+                'notes' => $reason
+                    ? ($hasPostedLinks ? "Finished claim: {$reason}" : "Released: {$reason}")
+                    : ($hasPostedLinks
+                        ? 'Teller finished multi-bill claim; request stays bill-ready for payment'
+                        : 'Released back to queue by teller'),
+                'metadata' => [
+                    'original_priority_at' => $request->initial_submitted_at?->toISOString(),
+                    'kept_bill_ready' => (bool) $hasPostedLinks,
+                ],
+                'created_at' => $now,
+            ]);
+
+            $this->broadcastQueueRefresh($request, $hasPostedLinks ? 'bill_ready_finished' : 'released');
+
+            return $request->fresh(['customer', 'location', 'documents.documentType', 'invoice', 'invoices']);
+        });
+    }
+
+    /**
+     * Terminal teller cancellation (Decision W22).
+     * Distinct from request-correction: the request leaves the queue and cannot be resubmitted as the same ticket.
+     * Linked unposted draft invoices are abandoned; posted fiscal documents are never rewritten.
+     */
+    public function cancelByTeller(BillingRequest $request, User $teller, string $reason): BillingRequest
+    {
+        if ($request->assigned_to_user_id !== $teller->id) {
+            throw ValidationException::withMessages([
+                'assignment' => 'Only the assigned teller can cancel this request.',
+            ]);
+        }
+
+        if (! in_array($request->status, [
+            BillingRequest::STATUS_IN_REVIEW,
+            BillingRequest::STATUS_BILLING_IN_PROGRESS,
+            BillingRequest::STATUS_BILL_READY,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'status' => "Cannot cancel a request that is currently in {$request->status}. Use release or request correction instead.",
+            ]);
+        }
+
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                'reason' => 'A customer-visible cancellation reason is required.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($request, $teller, $reason) {
+            $now = Carbon::now();
+            $fromStatus = $request->status;
+
+            if ($request->draft_invoice_id) {
+                $draft = Invoice::whereKey($request->draft_invoice_id)->lockForUpdate()->first();
+                if ($draft && $draft->status === 'DRAFT') {
+                    $draft->update([
+                        'status' => 'CANCELLED',
+                        'notes' => trim(($draft->notes ? $draft->notes."\n" : '').'Abandoned: billing request cancelled by teller.'),
+                    ]);
+                }
+            }
+
+            $hasPostedLinks = BillingRequestInvoice::where('billing_request_id', $request->id)->exists()
+                || $request->invoice_id;
+
+            if ($hasPostedLinks) {
+                throw ValidationException::withMessages([
+                    'status' => 'This request already has a linked posted invoice and cannot be cancelled here.',
+                ]);
+            }
+
+            $request->update([
+                'status' => BillingRequest::STATUS_CANCELLED,
+                'correction_notes' => $reason,
+                'internal_notes' => trim(($request->internal_notes ? $request->internal_notes."\n" : '')."Cancelled by teller {$teller->id}: {$reason}"),
                 'assigned_to_user_id' => null,
                 'assigned_at' => null,
                 'assignment_heartbeat_at' => null,
@@ -678,23 +1064,45 @@ class BillingRequestQueueService
             BillingRequestEvent::create([
                 'billing_request_id' => $request->id,
                 'actor_id' => $teller->id,
-                'event_type' => 'RELEASED',
-                'from_status' => BillingRequest::STATUS_IN_REVIEW,
-                'to_status' => BillingRequest::STATUS_QUEUED,
-                'notes' => $reason ? "Released: {$reason}" : 'Released back to queue by teller',
-                'metadata' => ['original_priority_at' => $request->initial_submitted_at->toISOString()],
+                'event_type' => 'CANCELLED',
+                'from_status' => $fromStatus,
+                'to_status' => BillingRequest::STATUS_CANCELLED,
+                'notes' => $reason,
+                'metadata' => [
+                    'cancelled_by_user_id' => $teller->id,
+                    'draft_invoice_id' => $request->draft_invoice_id,
+                ],
                 'created_at' => $now,
             ]);
 
-            broadcast(new DataRefreshEvent(
-                $request->organization_id,
-                'queue',
-                'billing_request',
-                $request->id,
-                'released'
-            ));
+            $this->notifications->publish(
+                (int) $request->organization_id,
+                (int) $request->created_by_user_id,
+                'QUEUE',
+                'Billing Request Cancelled',
+                "Your request {$request->transaction_no} was cancelled: {$reason}",
+                [
+                    'billing_request_id' => $request->id,
+                    'transaction_no' => $request->transaction_no,
+                    'status' => BillingRequest::STATUS_CANCELLED,
+                    'reason' => $reason,
+                ],
+            );
 
-            return $request;
+            $this->broadcastQueueRefresh($request, 'cancelled');
+
+            $this->dispatchTransactionalNotice(
+                $request,
+                'BILLING_REQUEST_CANCELLED',
+                [
+                    'recipient_name' => $request->customer?->name ?? 'Valued Customer',
+                    'reference_no' => $request->transaction_no,
+                    'action_label' => 'Request Cancelled',
+                    'org_name' => $request->organization?->name ?? 'SCIPSI',
+                ]
+            );
+
+            return $request->fresh(['customer', 'location', 'documents.documentType']);
         });
     }
 
@@ -739,13 +1147,7 @@ class BillingRequestQueueService
                     'created_at' => $now,
                 ]);
 
-                broadcast(new DataRefreshEvent(
-                    $request->organization_id,
-                    'queue',
-                    'billing_request',
-                    $request->id,
-                    'recovered'
-                ));
+                $this->broadcastQueueRefresh($request, 'recovered');
 
                 $count++;
             }
@@ -785,5 +1187,21 @@ class BillingRequestQueueService
         } else {
             $dispatch();
         }
+    }
+
+    /**
+     * Wake authorized tellers and only the customer who owns the request.
+     */
+    protected function broadcastQueueRefresh(BillingRequest $request, string $action): void
+    {
+        SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
+            organizationId: $request->organization_id,
+            scope: 'queue',
+            entity: 'billing_request',
+            entityId: $request->id,
+            action: $action,
+            userId: $request->created_by_user_id,
+            broadcastToOrganization: false,
+        ));
     }
 }

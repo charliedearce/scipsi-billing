@@ -23,6 +23,14 @@ class InAppNotification extends Model
 {
     use HasFactory;
 
+    public const TYPE_CHAT_MESSAGE = 'chat_message';
+
+    public const CHANNEL_WORK = 'work';
+
+    public const CHANNEL_CHAT = 'chat';
+
+    public const CHANNEL_ALL = 'all';
+
     protected function casts(): array
     {
         return [
@@ -50,5 +58,30 @@ class InAppNotification extends Model
     public function scopeForUser(Builder $query, int $userId): Builder
     {
         return $query->where('user_id', $userId);
+    }
+
+    /**
+     * Work/transaction stream — excludes chat wake-ups so tellers are not confused.
+     */
+    public function scopeWorkChannel(Builder $query): Builder
+    {
+        return $query->where('type', '!=', self::TYPE_CHAT_MESSAGE);
+    }
+
+    /**
+     * Chat stream — durable chat_message rows (UI prefers conversation summaries).
+     */
+    public function scopeChatChannel(Builder $query): Builder
+    {
+        return $query->where('type', self::TYPE_CHAT_MESSAGE);
+    }
+
+    public function scopeForChannel(Builder $query, ?string $channel): Builder
+    {
+        return match (strtolower((string) $channel)) {
+            self::CHANNEL_WORK => $query->workChannel(),
+            self::CHANNEL_CHAT => $query->chatChannel(),
+            default => $query,
+        };
     }
 }

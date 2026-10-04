@@ -77,9 +77,10 @@ class ManualPaymentProofWorkflowTest extends TestCase
         ]);
         $this->tellerOne = $this->userWithRole('Teller One', 'teller.one@example.test', 'Teller');
         $this->tellerTwo = $this->userWithRole('Teller Two', 'teller.two@example.test', 'Teller');
-        PaymentPolicyVersion::create([
+        PaymentPolicyVersion::updateOrCreate([
             'organization_id' => $this->admin->organization_id,
             'version_number' => 1,
+        ], [
             'currency' => 'PHP',
             'gateway_enabled' => false,
             'manual_instructions' => 'Deposit only to the verified SCIPSI test receiving account and retain the bank reference.',
@@ -121,6 +122,49 @@ class ManualPaymentProofWorkflowTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors('proof_file_id');
         $this->assertDatabaseCount('manual_payment_submissions', 1);
+    }
+
+    public function test_customer_can_view_full_posted_bill_detail_by_id(): void
+    {
+        $invoice = $this->postedInvoice();
+        $otherCustomer = Customer::create([
+            'organization_id' => $this->admin->organization_id,
+            'account_number' => 'PROOF-DETAIL-OTHER',
+            'name' => 'Detail Other Customer',
+            'status' => 'active',
+            'customer_type' => 'business',
+        ]);
+        $profile = CustomerBuyerProfile::create(['customer_id' => $otherCustomer->id, 'current_version' => 1, 'is_active' => true]);
+        BuyerProfileVersion::create([
+            'buyer_profile_id' => $profile->id, 'version' => 1, 'registered_name' => 'Detail Other Customer, Inc.',
+            'tin' => '777-888-999-000', 'branch_code' => '00000', 'tax_classification' => 'REGULAR',
+            'billing_address' => ['street' => 'Detail Wharf', 'city' => 'General Santos City', 'province' => 'South Cotabato'],
+            'effective_from' => now()->subDay(), 'status' => 'active',
+        ]);
+        $foreignInvoice = $this->postedInvoice($otherCustomer);
+
+        $this->actingAs($this->customerUser, 'sanctum')
+            ->getJson('/api/v1/portal/bills/'.$invoice->id.'?customer_id='.$this->customer->id)
+            ->assertOk()
+            ->assertJsonPath('data.id', $invoice->id)
+            ->assertJsonPath('data.invoice_number', $invoice->invoice_number)
+            ->assertJsonPath('data.amounts.total_charge_amount', (string) $invoice->total_charge_amount)
+            ->assertJsonPath('data.buyer.name', $invoice->buyer_snapshot_name)
+            ->assertJsonPath('data.shipment.vessel_name', $invoice->vessel_name)
+            ->assertJsonPath('data.shipment.voyage', $invoice->voyage)
+            ->assertJsonPath('data.shipment.movement_type', $invoice->movement_type)
+            ->assertJsonPath('data.shipment.route_type', $invoice->route_type)
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.source_attachments', [])
+            ->assertJsonPath('data.timeline.bill_approved_at', $invoice->fresh()->posted_at?->toIso8601String());
+
+        $this->actingAs($this->customerUser, 'sanctum')
+            ->getJson('/api/v1/portal/bills/'.$foreignInvoice->id.'?customer_id='.$this->customer->id)
+            ->assertNotFound();
+
+        $this->actingAs($this->customerUser, 'sanctum')
+            ->getJson('/api/v1/portal/bills/'.$invoice->id.'?customer_id='.$otherCustomer->id)
+            ->assertForbidden();
     }
 
     public function test_customer_cannot_submit_another_customers_invoice_or_account(): void
@@ -423,6 +467,7 @@ class ManualPaymentProofWorkflowTest extends TestCase
         $customer ??= $this->customer;
         $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', [
             'customer_id' => $customer->id,
+            ...$this->invoiceShipmentPayload(),
             'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]],
         ])->assertCreated();
         $id = $draft->json('data.id');

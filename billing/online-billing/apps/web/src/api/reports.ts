@@ -2,10 +2,14 @@ import request from '@/utils/http'
 
 export type BillingCollectionsDocumentType = 'INVOICE' | 'RECEIPT'
 
+export type BillingCollectionsReceiptKind = 'OFFICIAL' | 'ACKNOWLEDGEMENT'
+
 export interface BillingCollectionsRow {
   document_type: BillingCollectionsDocumentType
   document_id: number
   document_number: string
+  receipt_kind?: BillingCollectionsReceiptKind | null
+  counts_as_official_receipt?: boolean | null
   business_date: string
   status: string
   customer_id: number
@@ -95,5 +99,55 @@ export function exportBillingCollectionsReport(params: BillingCollectionsReportP
     params,
     responseType: 'blob',
     showErrorMessage: false
+  })
+}
+
+export interface AdminDashboardMoney {
+  count: number
+  amount: string
+}
+
+export interface AdminDashboardDay {
+  business_date: string
+  bills: AdminDashboardMoney
+  official_receipts: AdminDashboardMoney
+  acknowledgements: AdminDashboardMoney
+}
+
+export interface AdminDashboardCurrency {
+  currency: string
+  bills_posted_today: AdminDashboardMoney
+  official_receipts_posted_today: AdminDashboardMoney
+  acknowledgements_posted_today: AdminDashboardMoney
+  open_bills: AdminDashboardMoney
+  last_7_days: AdminDashboardDay[]
+}
+
+export interface AdminDashboardTeller {
+  user_id: number
+  name: string
+  bills_posted_today: AdminDashboardMoney
+  official_receipts_posted_today: AdminDashboardMoney
+  acknowledgements_posted_today: AdminDashboardMoney
+  billing_requests_in_review: number
+  payment_proofs_assigned: number
+}
+
+export interface AdminDashboard {
+  business_date: string
+  timezone: string
+  notice: string
+  currencies: AdminDashboardCurrency[]
+  work_waiting: {
+    billing_requests_queued: number
+    payment_proofs_waiting: number
+    document_corrections_pending: number
+  }
+  tellers: AdminDashboardTeller[]
+}
+
+export function fetchAdminDashboard() {
+  return request.get<AdminDashboard>({
+    url: '/api/v1/admin/dashboard'
   })
 }

@@ -1,14 +1,20 @@
 <template>
   <div
-    class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5"
+    class="art-card relative flex h-28 flex-col justify-center px-5"
+    :class="icon ? 'pr-20' : ''"
   >
-    <div class="text-xs font-medium uppercase tracking-wider text-slate-500">{{ label }}</div>
+    <span class="text-sm text-g-700">{{ label }}</span>
+    <span class="mt-1.5 text-xl font-medium" :class="warning ? 'text-danger' : 'text-g-900'">{{
+      value
+    }}</span>
+    <span v-if="detail" class="mt-1 text-xs text-g-600">{{ detail }}</span>
     <div
-      class="mt-2 text-xl font-bold"
-      :class="warning ? 'text-rose-600' : 'text-slate-800 dark:text-slate-100'"
-      >{{ value }}</div
+      v-if="icon"
+      class="absolute bottom-0 right-5 top-0 m-auto size-11 flex-cc rounded-xl"
+      :class="warning ? 'bg-danger/10 text-danger' : 'bg-g-200/70 text-g-700'"
     >
-    <div v-if="detail" class="mt-1 text-xs text-slate-500">{{ detail }}</div>
+      <ArtSvgIcon :icon="icon" class="text-xl" />
+    </div>
   </div>
 </template>
 <script setup lang="ts">

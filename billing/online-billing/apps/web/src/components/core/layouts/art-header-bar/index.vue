@@ -53,6 +53,8 @@
           v-if="(shouldShowBreadcrumb && isLeftMenu) || (shouldShowBreadcrumb && isDualMenu)"
         />
 
+        <ArtPageInfo />
+
         <!-- 顶部菜单 -->
         <ArtHorizontalMenu v-if="isTopMenu" :list="menuList" />
 
@@ -94,7 +96,16 @@
           class="notice-button relative"
           @click="visibleNotice"
         >
-          <div class="absolute top-2 right-2 size-1.5 !bg-danger rounded-full"></div>
+          <div
+            v-if="realtimeStore.unreadNotificationCount > 0"
+            class="absolute top-1.5 right-1.5 min-w-4 h-4 px-1 !bg-danger rounded-full text-[10px] text-white flex-cc leading-none"
+          >
+            {{
+              realtimeStore.unreadNotificationCount > 99
+                ? '99+'
+                : realtimeStore.unreadNotificationCount
+            }}
+          </div>
         </ArtIconButton>
 
         <!-- 聊天按钮 -->
@@ -104,7 +115,16 @@
           class="chat-button relative"
           @click="openChat"
         >
-          <div class="breathing-dot absolute top-2 right-2 size-1.5 !bg-success rounded-full"></div>
+          <div
+            v-if="realtimeStore.unreadChatCount > 0"
+            class="absolute top-1.5 right-1.5 min-w-4 h-4 px-1 !bg-success rounded-full text-[10px] text-white flex-cc leading-none"
+          >
+            {{ realtimeStore.unreadChatCount > 99 ? '99+' : realtimeStore.unreadChatCount }}
+          </div>
+          <div
+            v-else
+            class="breathing-dot absolute top-2 right-2 size-1.5 !bg-success rounded-full opacity-40"
+          ></div>
         </ArtIconButton>
 
         <!-- 设置按钮 -->
@@ -158,8 +178,11 @@
   import { useCommon } from '@/hooks/core/useCommon'
   import { useHeaderBar } from '@/hooks/core/useHeaderBar'
   import ArtUserMenu from './widget/ArtUserMenu.vue'
+  import { useRealtimeStore } from '@/store/modules/realtime'
 
   defineOptions({ name: 'ArtHeaderBar' })
+
+  const realtimeStore = useRealtimeStore()
 
   // 检测操作系统类型
   const isWindows = navigator.userAgent.includes('Windows')

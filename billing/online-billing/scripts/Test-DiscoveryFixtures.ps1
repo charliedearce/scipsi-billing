@@ -24,7 +24,10 @@ foreach ($case in $fixtures.cases) {
             $baseGross = (D $v.quantity) * $rate
             $gross = $baseGross * (D $v.factor)
             $rate = $rate * (D $v.factor)
-            if ($v.fuel) { $gross=[decimal]::Truncate($gross); $rate=[decimal]::Truncate($rate) }
+            if ($v.fuel) {
+                $gross = [decimal]::Floor($gross)
+                $rate = [decimal]::Round($rate, 2, [MidpointRounding]::AwayFromZero)
+            }
             $actual = @{base_gross=$baseGross; gross=$gross; rate=$rate}
         }
         'full_receipt' {

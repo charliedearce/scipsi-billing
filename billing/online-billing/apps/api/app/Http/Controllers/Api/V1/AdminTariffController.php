@@ -60,7 +60,12 @@ class AdminTariffController extends Controller
                 'required',
                 'string',
                 'max:64',
-                Rule::unique('tariffs')->where('organization_id', $orgId),
+                Rule::unique('tariffs')->where(function ($query) use ($orgId, $request) {
+                    return $query
+                        ->where('organization_id', $orgId)
+                        ->where('service_type', $request->input('service_type'))
+                        ->where('route_type', $request->input('route_type'));
+                }),
             ],
             'name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'in:ARRASTRE,STEVEDORING,OTHER'],

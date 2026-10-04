@@ -33,9 +33,9 @@
           </div>
         </div>
         <ul class="py-4 mt-3 border-t border-g-300/80">
-          <li class="btn-item" @click="goPage('/system/user-center')">
+          <li class="btn-item" @click="goProfile">
             <ArtSvgIcon icon="ri:user-3-line" />
-            <span>{{ $t('topBar.user.userCenter') }}</span>
+            <span>{{ isCustomer ? 'Profile Settings' : $t('topBar.user.userCenter') }}</span>
           </li>
           <li class="btn-item" @click="toDocs()">
             <ArtSvgIcon icon="ri:book-2-line" />
@@ -76,12 +76,21 @@
   const { getUserInfo: userInfo } = storeToRefs(userStore)
   const userMenuPopover = ref()
 
+  const isCustomer = computed(() => {
+    const roles = (userInfo.value as any)?.roles || []
+    return Array.isArray(roles) && roles.includes('Customer')
+  })
+
   /**
    * 页面跳转
    * @param {string} path - 目标路径
    */
   const goPage = (path: string): void => {
     router.push(path)
+  }
+
+  const goProfile = (): void => {
+    goPage(isCustomer.value ? '/my-profile' : '/system/user-center')
   }
 
   /**

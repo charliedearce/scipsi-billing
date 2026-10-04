@@ -28,6 +28,7 @@ export interface VipCreditSummary {
     due_date_basis: 'INVOICE_DATE' | 'CREDIT_CHARGE_DATE'
     overdue_restriction: 'ALLOW' | 'WARN' | 'BLOCK'
     overdue_grace_days: number
+    currency?: string
   }
   exposure_amount?: string
   overdue_amount?: string
@@ -47,8 +48,21 @@ export interface VipCreditRepayment {
   confirmed_reference?: string | null
   initial_submitted_at: string
   rejection_reason?: string | null
+  resubmission_rounds?: number
   lock_version: number
-  receipt?: { id: number; receipt_number: string; status: string; applied_amount: string } | null
+  proof_file?: {
+    id: number
+    current_version?: number
+    latest_version?: { version_number?: number; original_name?: string; mime_type?: string } | null
+  } | null
+  receipt?: {
+    id: number
+    receipt_number: string
+    receipt_kind?: 'OFFICIAL' | 'ACKNOWLEDGEMENT' | string | null
+    status: string
+    applied_amount: string
+    canonical_artifact?: { id?: number; status?: string } | null
+  } | null
   customer?: { id: number; name: string } | null
   allocations: Array<{
     invoice_id: number
@@ -92,10 +106,18 @@ export function chargeBillsToVipCredit(data: {
   return request.post<VipCreditSummary>({ url: '/api/v1/portal/credit-charges', data })
 }
 
-export function fetchVipCreditRepayments(customerId: number) {
-  return request.get<{ data: VipCreditRepayment[] }>({
+export interface VipCreditRepaymentPage {
+  data: VipCreditRepayment[]
+  current_page: number
+  last_page: number
+  per_page: number
+  total: number
+}
+
+export function fetchVipCreditRepayments(customerId: number, page = 1) {
+  return request.get<VipCreditRepaymentPage>({
     url: '/api/v1/portal/credit-repayments',
-    params: { customer_id: customerId }
+    params: { customer_id: customerId, page }
   })
 }
 
@@ -167,5 +189,88 @@ export function publishCreditPolicy(id: number, expectedLockVersion: number, rea
   return request.post<CreditPolicyVersion>({
     url: `/api/v1/admin/credit-policies/${id}/publish`,
     data: { expected_lock_version: expectedLockVersion, reason }
+  })
+}
+
+export function deleteCreditPolicyDraft(id: number, expectedLockVersion: number) {
+  return request.del<{ message?: string }>({
+    url: `/api/v1/admin/credit-policies/${id}`,
+    params: { expected_lock_version: expectedLockVersion }
+  })
+}
+
+export type VipCreditProfileStatus = 'ACTIVE' | 'HELD' | 'DISABLED'
+
+export interface AdminCreditAccountVersion {
+  id: number
+  version_number: number
+  status: VipCreditProfileStatus
+  credit_limit_mode_override?: 'CAPPED' | 'UNLIMITED' | null
+  credit_limit_amount_override?: string | null
+  payment_terms_days_override?: number | null
+  due_date_basis_override?: 'INVOICE_DATE' | 'CREDIT_CHARGE_DATE' | null
+  overdue_restriction_override?: 'ALLOW' | 'WARN' | 'BLOCK' | null
+  overdue_grace_days_override?: number | null
+  overdue_amount_threshold_override?: string | null
+  effective_from: string
+  effective_to?: string | null
+  reason?: string
+  lock_version?: number
+}
+
+export interface AdminCreditAccount {
+  id: number
+  customer_id: number
+  lock_version: number
+  customer?: {
+    id: number
+    name: string
+    account_number?: string
+    customer_type?: string
+    status?: string
+  }
+  versions?: AdminCreditAccountVersion[]
+}
+
+export interface AdminCreditAccountList {
+  data: AdminCreditAccount[]
+  current_page: number
+  last_page: number
+  per_page: number
+  total: number
+}
+
+export interface VipCreditAccountProfileInput {
+  expected_account_lock_version?: number
+  status: VipCreditProfileStatus
+  effective_from: string
+  effective_to?: string | null
+  reason: string
+  credit_limit_mode_override?: 'CAPPED' | 'UNLIMITED' | null
+  credit_limit_amount_override?: string | null
+  payment_terms_days_override?: number | null
+  due_date_basis_override?: 'INVOICE_DATE' | 'CREDIT_CHARGE_DATE' | null
+  overdue_restriction_override?: 'ALLOW' | 'WARN' | 'BLOCK' | null
+  overdue_grace_days_override?: number | null
+  overdue_amount_threshold_override?: string | null
+}
+
+export function fetchAdminCreditAccounts(page = 1) {
+  return request.get<AdminCreditAccountList>({
+    url: '/api/v1/admin/credit-accounts',
+    params: { page }
+  })
+}
+
+export function configureVipCreditAccount(customerId: number, body: VipCreditAccountProfileInput) {
+  return request.post<AdminCreditAccount>({
+    url: `/api/v1/admin/credit-accounts/${customerId}/versions`,
+    data: body
+  })
+}
+
+export function fetchStaffCreditAccountSummary(accountId: number) {
+  return request.get<VipCreditSummary>({
+    url: `/api/v1/credit-accounts/${accountId}`
   })
 }

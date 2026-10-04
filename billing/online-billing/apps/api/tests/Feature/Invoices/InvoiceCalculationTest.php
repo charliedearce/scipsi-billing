@@ -98,16 +98,12 @@ class InvoiceCalculationTest extends TestCase
         $this->assertEquals('110.26', $result['charge']);
     }
 
-    public function test_calculates_line_item_with_fuel_surcharge_and_ppa_and_tax(): void
+    public function test_calculates_rounded_fuel_gross_without_ppa_and_with_tax(): void
     {
         // Quantity: 10, Unit Rate: 125.50
         // Base Gross: 1255.00
-        // Fuel Surcharge: 5% (0.0500) -> 62.75
-        // Gross: 1255.00 + 62.75 = 1317.75
-        // PPA Share: 10% (0.1000) of 1317.75 -> T2(131.775) = 131.77
-        // Net: 1317.75 - 131.77 = 1185.98
-        // Tax (VATABLE 12%): 1185.98 * 0.12 = T2(142.3176) = 142.31
-        // Total Charge: Gross (1317.75) + Tax (142.31) = 1460.06
+        // Fuel gross: 1255.00 * 1.05 = 1317.75 -> 1318.00
+        // PPA is suppressed; VAT is 12% of 1318.00.
         $calc = $this->calculator->calculateItem(
             quantity: '10.0000',
             rate: '125.5000',
@@ -121,23 +117,21 @@ class InvoiceCalculationTest extends TestCase
         );
 
         $this->assertEquals('1255.00', $calc['base_gross_amount']);
-        $this->assertEquals('62.75', $calc['fuel_surcharge_amount']);
-        $this->assertEquals('1317.75', $calc['gross_amount']);
-        $this->assertEquals('131.77', $calc['ppa_amount']);
-        $this->assertEquals('1185.98', $calc['net_amount']);
-        $this->assertEquals('142.31', $calc['tax_amount']);
-        $this->assertEquals('1460.06', $calc['total_charge_amount']);
+        $this->assertSame('63.00', $calc['fuel_surcharge_amount']);
+        $this->assertSame('1318.00', $calc['gross_amount']);
+        $this->assertSame('0.00', $calc['ppa_amount']);
+        $this->assertSame('1318.00', $calc['net_amount']);
+        $this->assertSame('158.16', $calc['tax_amount']);
+        $this->assertSame('1476.16', $calc['total_charge_amount']);
     }
 
     public function test_calculates_zero_rated_foreign_cargo_line(): void
     {
         // Quantity: 5, Rate: 250.00 -> Base Gross: 1250.00
-        // Fuel Surcharge: 5% -> 62.50
-        // Gross: 1312.50
-        // PPA (20%): 262.50
-        // Net: 1050.00
+        // Fuel gross: 1250.00 * 1.05 = 1312.50 -> 1313.00
+        // PPA is suppressed; net is 1313.00.
         // Tax: 0.00 (ZERO_RATED)
-        // Total Charge: 1312.50
+        // Total Charge: 1313.00
         $calc = $this->calculator->calculateItem(
             quantity: '5.0000',
             rate: '250.0000',
@@ -149,12 +143,12 @@ class InvoiceCalculationTest extends TestCase
         );
 
         $this->assertEquals('1250.00', $calc['base_gross_amount']);
-        $this->assertEquals('62.50', $calc['fuel_surcharge_amount']);
-        $this->assertEquals('1312.50', $calc['gross_amount']);
-        $this->assertEquals('262.50', $calc['ppa_amount']);
-        $this->assertEquals('1050.00', $calc['net_amount']);
+        $this->assertSame('63.00', $calc['fuel_surcharge_amount']);
+        $this->assertSame('1313.00', $calc['gross_amount']);
+        $this->assertSame('0.00', $calc['ppa_amount']);
+        $this->assertSame('1313.00', $calc['net_amount']);
         $this->assertEquals('0.00', $calc['tax_amount']);
-        $this->assertEquals('1312.50', $calc['total_charge_amount']);
+        $this->assertSame('1313.00', $calc['total_charge_amount']);
     }
 
     public function test_fuel_surcharge_band_boundary_resolution(): void

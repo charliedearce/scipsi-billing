@@ -29,6 +29,8 @@ import { RouteRecordRaw } from 'vue-router'
 export interface RouteMeta extends Record<string | number | symbol, unknown> {
   /** 路由标题 */
   title: string
+  /** What the page is for, shown in the header "About this page" popover */
+  description?: string
   /** 路由图标 */
   icon?: string
   /** 是否显示徽章 */
@@ -54,6 +56,11 @@ export interface RouteMeta extends Record<string | number | symbol, unknown> {
   isFirstLevel?: boolean
   /** 角色权限 */
   roles?: string[]
+  /**
+   * 子菜单保留各自的绝对路径。
+   * 用于只重组菜单分组、不改变既有地址的目录菜单（例如已经被通知深链引用的页面）。
+   */
+  absoluteChildPaths?: boolean
   /** 是否固定标签页 */
   fixedTab?: boolean
   /** 激活菜单路径 */

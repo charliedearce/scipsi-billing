@@ -5,12 +5,22 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Invoice extends Model
 {
     use HasFactory;
+
+    public const STATUS_DRAFT = 'DRAFT';
+
+    public const STATUS_POSTED = 'POSTED';
+
+    public const STATUS_CANCELLED = 'CANCELLED';
+
+    /** Issued SI replaced by a linked correction; number/PDF kept, not collectible. */
+    public const STATUS_SUPERSEDED = 'SUPERSEDED';
 
     protected $fillable = [
         'organization_id',
@@ -22,6 +32,7 @@ class Invoice extends Model
         'series_id',
         'invoice_number',
         'status',
+        'superseded_by_invoice_id',
         'business_date',
         'accounting_period_id',
         'backdate_authorization_id',
@@ -54,7 +65,14 @@ class Invoice extends Model
         'total_charge_amount',
         'is_fiscal_ready',
         'fiscal_readiness_errors',
+        'vessel_id',
+        'vessel_name',
+        'voyage',
+        'movement_type',
+        'route_type',
         'notes',
+        'surcharge_mode',
+        'dangerous_cargo_percent',
         'lock_version',
         'created_by_user_id',
         'updated_by_user_id',
@@ -71,6 +89,7 @@ class Invoice extends Model
         'net_amount' => 'string',
         'tax_amount' => 'string',
         'total_charge_amount' => 'string',
+        'dangerous_cargo_percent' => 'string',
         'is_fiscal_ready' => 'boolean',
         'fiscal_readiness_errors' => 'array',
         'buyer_snapshot_address' => 'array',
@@ -182,14 +201,58 @@ class Invoice extends Model
         return $this->belongsTo(WalkInCustomer::class, 'walk_in_customer_id');
     }
 
+    public function vessel(): BelongsTo
+    {
+        return $this->belongsTo(Vessel::class);
+    }
+
     public function billingRequest(): HasOne
     {
         return $this->hasOne(BillingRequest::class, 'invoice_id');
     }
 
+    public function billingRequestLinks(): HasMany
+    {
+        return $this->hasMany(BillingRequestInvoice::class);
+    }
+
+    public function billingRequests(): BelongsToMany
+    {
+        return $this->belongsToMany(BillingRequest::class, 'billing_request_invoices')
+            ->withPivot(['linked_by_user_id', 'linked_at'])
+            ->withTimestamps();
+    }
+
     public function receiptAllocations(): HasMany
     {
         return $this->hasMany(ReceiptAllocation::class);
+    }
+
+    /**
+     * True when at least one POSTED receipt allocation exists (W26 unpaid vs settled).
+     */
+    public function hasPostedSettlement(): bool
+    {
+        if ($this->relationLoaded('receiptAllocations')) {
+            return $this->receiptAllocations->contains(
+                fn ($allocation) => $allocation->receipt && $allocation->receipt->status === 'POSTED'
+            );
+        }
+
+        return $this->receiptAllocations()
+            ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))
+            ->exists();
+    }
+
+    /** Collectible for payment / claim / Correct bill — posted and not replaced. */
+    public function isCollectible(): bool
+    {
+        return $this->status === self::STATUS_POSTED;
+    }
+
+    public function supersededByInvoice(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'superseded_by_invoice_id');
     }
 
     public function correctionRequests(): HasMany

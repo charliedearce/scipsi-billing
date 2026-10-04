@@ -193,7 +193,28 @@ async function handleRouteGuard(
     return
   }
 
-  // 6. 未匹配到路由，跳转到 404
+  // 6. Role-aware fallback for known claim paths (avoid bare 404 when the
+  // opposite portal role opens a teller/customer claim URL).
+  const roles = Array.isArray(userStore.info?.roles)
+    ? userStore.info.roles.map(String)
+    : []
+  const isCustomer = roles.includes('Customer')
+  const isClaimStaff =
+    roles.includes('Teller') ||
+    roles.includes('Administrator') ||
+    (Array.isArray((userStore.info as any)?.permissions) &&
+      (userStore.info as any).permissions.includes('bill_claims:review'))
+
+  if (to.path === '/bill-claim-review' && isCustomer && !isClaimStaff) {
+    next({ path: '/claim-bill', replace: true })
+    return
+  }
+  if (to.path === '/claim-bill' && isClaimStaff && !isCustomer) {
+    next({ path: '/bill-claim-review', replace: true })
+    return
+  }
+
+  // 7. 未匹配到路由，跳转到 404
   next({ name: 'Exception404' })
 }
 
@@ -316,15 +337,30 @@ async function handleDynamicRoutes(
 
     // 9. 重新导航到目标路由
     if (!hasPermission) {
-      // 无权限访问，跳转到首页
       closeLoading()
 
-      // 输出警告信息
-      console.warn(`[RouteGuard] 用户无权限访问路径: ${to.path}，已跳转到首页`)
+      const userStore = useUserStore()
+      const roles = Array.isArray(userStore.info?.roles)
+        ? userStore.info.roles.map(String)
+        : []
+      const isCustomer = roles.includes('Customer')
+      const isClaimStaff =
+        roles.includes('Teller') ||
+        roles.includes('Administrator') ||
+        (Array.isArray((userStore.info as any)?.permissions) &&
+          (userStore.info as any).permissions.includes('bill_claims:review'))
 
-      // 直接跳转到首页
+      let fallbackPath = validatedPath
+      if (to.path === '/bill-claim-review' && isCustomer && !isClaimStaff) {
+        fallbackPath = '/claim-bill'
+      } else if (to.path === '/claim-bill' && isClaimStaff && !isCustomer) {
+        fallbackPath = '/bill-claim-review'
+      } else {
+        console.warn(`[RouteGuard] 用户无权限访问路径: ${to.path}，已跳转到首页`)
+      }
+
       next({
-        path: validatedPath,
+        path: fallbackPath,
         replace: true
       })
     } else {
@@ -373,6 +409,13 @@ async function fetchUserInfo(): Promise<void> {
   userStore.setUserInfo(data)
   // 检查并清理工作台标签页（如果是不同用户登录）
   userStore.checkAndClearWorktabs()
+  // W27: bootstrap Echo + in-app notification listeners after identity is known
+  try {
+    const { useRealtimeStore } = await import('@/store/modules/realtime')
+    await useRealtimeStore().bootstrap()
+  } catch (error) {
+    console.warn('[RouteGuard] Realtime bootstrap skipped:', error)
+  }
 }
 
 /**

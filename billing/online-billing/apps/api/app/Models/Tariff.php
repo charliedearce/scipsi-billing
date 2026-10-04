@@ -18,6 +18,9 @@ class Tariff extends Model
         'service_type',
         'route_type',
         'unit_of_measure',
+        'legacy_t_scode',
+        'legacy_t_sname',
+        'cargo_class',
         'is_active',
     ];
 

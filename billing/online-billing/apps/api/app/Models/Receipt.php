@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,9 +13,17 @@ class Receipt extends Model
 {
     use HasFactory;
 
+    public const KIND_OFFICIAL = 'OFFICIAL';
+
+    public const KIND_ACKNOWLEDGEMENT = 'ACKNOWLEDGEMENT';
+
+    /** @var array<int, string> */
+    public const KINDS = [self::KIND_OFFICIAL, self::KIND_ACKNOWLEDGEMENT];
+
     protected $fillable = [
         'organization_id', 'location_id', 'customer_id', 'series_id', 'posting_source_id',
-        'receipt_number', 'status', 'business_date', 'accounting_period_id', 'backdate_authorization_id', 'currency', 'payer_snapshot',
+        'receipt_number', 'status', 'receipt_kind', 'counts_as_official_receipt',
+        'business_date', 'accounting_period_id', 'backdate_authorization_id', 'currency', 'payer_snapshot',
         'cash_received_amount', 'withholding_received_amount', 'applied_amount',
         'unapplied_amount', 'lock_version', 'posted_by_user_id', 'posted_at',
     ];
@@ -23,9 +32,39 @@ class Receipt extends Model
     {
         return [
             'business_date' => 'date:Y-m-d', 'payer_snapshot' => 'array', 'posted_at' => 'datetime',
+            'counts_as_official_receipt' => 'boolean',
             'cash_received_amount' => 'string', 'withholding_received_amount' => 'string',
             'applied_amount' => 'string', 'unapplied_amount' => 'string', 'lock_version' => 'integer',
         ];
+    }
+
+    public function isOfficialReceipt(): bool
+    {
+        return $this->receipt_kind === self::KIND_OFFICIAL && $this->counts_as_official_receipt;
+    }
+
+    public function isAcknowledgement(): bool
+    {
+        return $this->receipt_kind === self::KIND_ACKNOWLEDGEMENT;
+    }
+
+    /** Document-series / Studio kind used when allocating and rendering this receipt. */
+    public function documentClass(): string
+    {
+        return $this->isAcknowledgement() ? 'ACKNOWLEDGEMENT_RECEIPT' : 'COLLECTION_RECEIPT';
+    }
+
+    /**
+     * Fiscal / BIR-facing official-receipt issuances only.
+     * Acknowledgement receipts settle internally but never appear here.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeOfficialFiscal($query)
+    {
+        return $query->where('receipt_kind', self::KIND_OFFICIAL)
+            ->where('counts_as_official_receipt', true);
     }
 
     public function organization(): BelongsTo

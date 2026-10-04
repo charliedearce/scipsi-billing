@@ -51,8 +51,17 @@ type Events = {
   openSetting: void
   // 打开搜索对话框事件 - 无参数
   openSearchDialog: void
-  // 打开聊天窗口事件 - 无参数
-  openChat: void
+  // 打开聊天窗口事件 - 可选 billing/conversation 上下文
+  openChat:
+    | {
+        conversationId?: number
+        billingRequestId?: number
+        billClaimId?: number
+        invoiceId?: number
+        receiptId?: number
+      }
+    | undefined
+    | void
   // 打开锁屏事件 - 无参数
   openLockScreen: void
 }

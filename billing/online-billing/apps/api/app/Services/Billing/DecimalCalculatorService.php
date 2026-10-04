@@ -72,25 +72,31 @@ class DecimalCalculatorService
         string $fuelSurchargeApplicability = 'NOT_APPLICABLE',
         ?string $fuelSurchargePercent = null,
         string $discountAmount = '0.00',
-        string $vatRate = self::DEFAULT_VAT_RATE
+        string $vatRate = self::DEFAULT_VAT_RATE,
+        bool $roundBaseGrossToCents = false
     ): array {
         // Base gross = quantity * rate
-        $rawBaseGross = bcmul($quantity, $rate, 4);
-        $baseGross = $this->truncate($rawBaseGross, 2);
+        $rawBaseGross = bcmul($quantity, $rate, 8);
+        $baseGross = $roundBaseGrossToCents
+            ? $this->round($rawBaseGross, 2)
+            : $this->truncate($rawBaseGross, 2);
 
-        // Fuel surcharge
-        if ($fuelSurchargeApplicability === 'APPLICABLE' && $fuelSurchargePercent !== null && bccomp($fuelSurchargePercent, '0', 4) > 0) {
-            $rawFuelSurcharge = bcmul($baseGross, $fuelSurchargePercent, 4);
-            $fuelSurcharge = $this->truncate($rawFuelSurcharge, 2);
+        // Fuel uses the legacy final-gross rule: apply the multiplier to the
+        // untruncated tariff gross, then round the resulting gross to a peso.
+        $fuelApplied = $fuelSurchargeApplicability === 'APPLICABLE'
+            && $fuelSurchargePercent !== null
+            && bccomp($fuelSurchargePercent, '0', 4) > 0;
+        if ($fuelApplied) {
+            $fuelFactor = bcadd('1', $fuelSurchargePercent, 4);
+            $gross = $this->truncate($this->round(bcmul($rawBaseGross, $fuelFactor, 8), 0), 2);
+            $fuelSurcharge = bcsub($gross, $baseGross, 2);
         } else {
             $fuelSurcharge = '0.00';
+            $gross = $baseGross;
         }
 
-        // Gross = base gross + fuel surcharge
-        $gross = bcadd($baseGross, $fuelSurcharge, 2);
-
         // PPA Share
-        if ($ppaShareApplicability === 'APPLICABLE' && bccomp($ppaShareRate, '0', 4) > 0) {
+        if (! $fuelApplied && $ppaShareApplicability === 'APPLICABLE' && bccomp($ppaShareRate, '0', 4) > 0) {
             $rawPpa = bcmul($gross, $ppaShareRate, 4);
             $ppa = $this->truncate($rawPpa, 2);
         } else {

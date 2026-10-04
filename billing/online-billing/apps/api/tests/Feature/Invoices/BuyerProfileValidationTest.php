@@ -42,6 +42,7 @@ class BuyerProfileValidationTest extends TestCase
         $response = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $suspendedCustomer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 1],
                 ],
@@ -50,9 +51,9 @@ class BuyerProfileValidationTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function test_allows_draft_with_incomplete_buyer_profile_but_flags_fiscal_unready(): void
+    public function test_allows_draft_with_optional_buyer_fields_blank(): void
     {
-        // Customer registered, but missing TIN and address (e.g. walk-in or newly registered)
+        // Customer registered with company name only — TIN/address may be filled later
         $incompleteCustomer = Customer::create([
             'organization_id' => $this->org->id,
             'account_number' => 'ACC-INCOMPLETE-01',
@@ -72,9 +73,9 @@ class BuyerProfileValidationTest extends TestCase
             'buyer_profile_id' => $profile->id,
             'version' => 1,
             'registered_name' => 'Sarangani Trading Co.',
-            'tin' => null, // Missing TIN
+            'tin' => null,
             'branch_code' => '00000',
-            'billing_address' => null, // Missing Address
+            'billing_address' => null,
             'effective_from' => Carbon::now()->subDay(),
             'status' => 'active',
         ]);
@@ -82,19 +83,62 @@ class BuyerProfileValidationTest extends TestCase
         $response = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $incompleteCustomer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 5],
                 ],
             ]);
 
-        // Draft creation succeeds! But fiscal posting readiness is false
         $response->assertStatus(201)
             ->assertJsonPath('data.status', 'DRAFT')
+            ->assertJsonPath('data.is_fiscal_ready', true)
+            ->assertJsonPath('data.fiscal_readiness_errors', []);
+    }
+
+    public function test_rejects_invalid_tin_when_buyer_provides_one(): void
+    {
+        $customer = Customer::create([
+            'organization_id' => $this->org->id,
+            'account_number' => 'ACC-BAD-TIN-01',
+            'name' => 'Bad Tin Trading',
+            'status' => 'active',
+            'customer_type' => 'business',
+            'lock_version' => 1,
+        ]);
+
+        $profile = CustomerBuyerProfile::create([
+            'customer_id' => $customer->id,
+            'current_version' => 1,
+            'is_active' => true,
+        ]);
+
+        BuyerProfileVersion::create([
+            'buyer_profile_id' => $profile->id,
+            'version' => 1,
+            'registered_name' => 'Bad Tin Trading',
+            'tin' => '12', // too short when provided
+            'branch_code' => '00000',
+            'billing_address' => [
+                'street' => 'Makar Wharf',
+                'city' => 'General Santos City',
+            ],
+            'effective_from' => Carbon::now()->subDay(),
+            'status' => 'active',
+        ]);
+
+        $response = $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/invoices/drafts', [
+                'customer_id' => $customer->id,
+                ...$this->invoiceShipmentPayload(),
+                'items' => [
+                    ['tariff_code' => 'ARR_DOM', 'quantity' => 1],
+                ],
+            ]);
+
+        $response->assertStatus(201)
             ->assertJsonPath('data.is_fiscal_ready', false);
 
-        $errors = $response->json('data.fiscal_readiness_errors');
-        $this->assertContains('tin', $errors);
-        $this->assertContains('billing_address', $errors);
+        $this->assertContains('tin', $response->json('data.fiscal_readiness_errors'));
     }
 
     public function test_complete_buyer_profile_marks_draft_as_fiscal_ready(): void
@@ -132,6 +176,7 @@ class BuyerProfileValidationTest extends TestCase
         $response = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $readyCustomer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 20],
                 ],

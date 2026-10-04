@@ -1,36 +1,49 @@
 <template>
-  <div class="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
-    <section
-      class="rounded-2xl bg-white border border-slate-200 p-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <div>
-        <h1 class="text-xl font-bold">VIP Credit Aging</h1>
-        <p class="text-sm text-slate-500 mt-1"
-          >Principal only. Credit charges and effective receipt allocations are reconciled at the
-          selected cutoff.</p
-        >
+  <div class="page-content space-y-5">
+    <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div class="flex items-start gap-3.5">
+        <div class="size-11 flex-cc shrink-0 rounded-lg bg-theme/10 text-theme">
+          <ArtSvgIcon icon="ri:hourglass-2-line" class="text-2xl" />
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-xl font-medium text-g-900">VIP Credit Aging</h1>
+          <p class="mt-1 max-w-2xl text-sm text-g-500">
+            Principal only. Credit charges and effective receipt allocations are reconciled at the
+            selected cutoff.
+          </p>
+        </div>
       </div>
-      <div class="flex gap-2"
-        ><ElDatePicker
+      <div class="flex flex-wrap items-center gap-2">
+        <ElDatePicker
           v-model="asOf"
           type="date"
           value-format="YYYY-MM-DD"
           class="!w-44"
           @change="load"
-        /><ElButton :loading="loading" @click="load">Refresh</ElButton
-        ><ElButton v-if="canExport" type="primary" :loading="exporting" @click="exportCsv"
-          ><ElIcon class="mr-1"><Download /></ElIcon>Export CSV</ElButton
-        ></div
-      >
-    </section>
+        />
+        <ElButton :loading="loading" @click="load">
+          <ArtSvgIcon icon="ri:refresh-line" class="mr-1" />
+          Refresh
+        </ElButton>
+        <ElButton v-if="canExport" type="primary" :loading="exporting" @click="exportCsv">
+          <ArtSvgIcon icon="ri:download-2-line" class="mr-1" />
+          Export CSV
+        </ElButton>
+      </div>
+    </header>
     <ElAlert
       type="info"
       :closable="false"
       show-icon
       title="A credit charge is not paid. Late charges, reversals and formal PPA release are separate workflows."
     />
-    <ElCard shadow="never" v-loading="loading">
-      <template #header><h2 class="font-semibold">Scoped credit accounts</h2></template>
+    <section v-loading="loading" class="art-card p-5">
+      <div class="art-card-header">
+        <div class="title">
+          <h4>Scoped credit accounts</h4>
+          <p>Select an account to open its aging detail</p>
+        </div>
+      </div>
       <ElEmpty
         v-if="accounts.length === 0"
         description="No VIP credit accounts are available in your scope."
@@ -39,7 +52,7 @@
         <ElTableColumn label="Customer" min-width="210"
           ><template #default="{ row }"
             >{{ row.account.customer_name
-            }}<span class="block text-xs text-slate-500">{{
+            }}<span class="block text-xs text-g-500">{{
               row.account.account_number
             }}</span></template
           ></ElTableColumn
@@ -52,23 +65,19 @@
           ><template #default="{ row }">{{ overdue(row) }}</template></ElTableColumn
         >
       </ElTable>
-    </ElCard>
-    <ElCard v-if="selected" shadow="never">
-      <template #header
-        ><div
-          ><h2 class="font-semibold"
-            >{{ selected.account?.customer_name || 'Credit account' }} — aging detail</h2
-          ><p class="text-xs text-slate-500 mt-1">{{ selected.cutoff_semantics }}</p></div
-        ></template
-      >
+    </section>
+    <section v-if="selected" class="art-card p-5">
+      <div class="art-card-header">
+        <div class="title">
+          <h4>{{ selected.account?.customer_name || 'Credit account' }} — aging detail</h4>
+          <p>{{ selected.cutoff_semantics }}</p>
+        </div>
+      </div>
       <div v-for="group in selected.currencies" :key="group.currency" class="mb-6 last:mb-0">
         <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4"
-          ><div
-            v-for="bucket in buckets"
-            :key="bucket.key"
-            class="rounded-lg border border-slate-200 p-3"
-            ><p class="text-xs text-slate-500">{{ bucket.label }}</p
-            ><p class="font-semibold mt-1">{{
+          ><div v-for="bucket in buckets" :key="bucket.key" class="art-card-xs p-3"
+            ><p class="text-xs text-g-500">{{ bucket.label }}</p
+            ><p class="mt-1 font-medium text-g-900">{{
               money(group.buckets[bucket.key], group.currency)
             }}</p></div
           ></div
@@ -91,13 +100,12 @@
           ></ElTable
         >
       </div>
-    </ElCard>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue'
-  import { Download } from '@element-plus/icons-vue'
   import { ElMessage } from 'element-plus'
   import {
     exportVipPrincipalAging,

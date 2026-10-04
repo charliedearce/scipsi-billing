@@ -12,6 +12,7 @@ use App\Models\ReceiptAllocation;
 use App\Models\ReceiptPostingSource;
 use App\Models\ReceiptTender;
 use App\Models\User;
+use App\Models\WalkInCustomer;
 use App\Models\WithholdingApplication;
 use App\Services\Audit\DocumentRevisionService;
 use Carbon\Carbon;
@@ -85,7 +86,10 @@ class ReceiptPostingService
             }
 
             foreach ($invoices as $invoice) {
-                if ($invoice->status !== 'POSTED' || $invoice->customer_id !== $customer->id || $invoice->currency !== ($data['currency'] ?? 'PHP')) {
+                $currency = strtoupper((string) ($data['currency'] ?? 'PHP'));
+                if ($invoice->status !== 'POSTED'
+                    || strtoupper((string) $invoice->currency) !== $currency
+                    || ! $this->customerOwnsPostedInvoice($customer, $invoice)) {
                     throw ValidationException::withMessages(['allocations' => ["Invoice {$invoice->id} is not an eligible posted invoice for this customer/currency."]]);
                 }
                 $input = $invoiceInputs->get($invoice->id);
@@ -99,7 +103,12 @@ class ReceiptPostingService
                 }
             }
 
-            $series = $this->resolveSeries($actor->organization_id, $data['series_id'] ?? null);
+            $receiptKind = $this->resolveReceiptKind($data['receipt_kind'] ?? null);
+            $countsAsOfficial = $receiptKind === Receipt::KIND_OFFICIAL;
+            $documentClass = $receiptKind === Receipt::KIND_ACKNOWLEDGEMENT
+                ? 'ACKNOWLEDGEMENT_RECEIPT'
+                : 'COLLECTION_RECEIPT';
+            $series = $this->resolveSeries($actor->organization_id, $documentClass, $data['series_id'] ?? null);
             $now = Carbon::now('Asia/Manila');
             $businessDate = Carbon::parse($data['business_date'] ?? $now->toDateString(), 'Asia/Manila')->startOfDay();
             $receipt = Receipt::create([
@@ -108,7 +117,10 @@ class ReceiptPostingService
                 'customer_id' => $customer->id,
                 'series_id' => $series->id,
                 'posting_source_id' => $source->id,
-                'status' => 'POSTED', 'business_date' => $businessDate->toDateString(),
+                'status' => 'POSTED',
+                'receipt_kind' => $receiptKind,
+                'counts_as_official_receipt' => $countsAsOfficial,
+                'business_date' => $businessDate->toDateString(),
                 'currency' => $data['currency'] ?? 'PHP', 'payer_snapshot' => $this->payerSnapshot($customer, $invoices->first(), $data),
                 'posted_by_user_id' => $actor->id, 'posted_at' => $now,
             ]);
@@ -122,7 +134,7 @@ class ReceiptPostingService
                 documentId: $receipt->id
             );
             $receipt->update(['accounting_period_id' => $period->id, 'backdate_authorization_id' => $backdateAuthorization?->id]);
-            $docNumber = $series->allocateNextNumber($actor, 'COLLECTION_RECEIPT', $receipt->id);
+            $docNumber = $series->allocateNextNumber($actor, $documentClass, $receipt->id);
             $receipt->update(['receipt_number' => $docNumber->formatted_number]);
             $docNumber->update(['status' => 'ISSUED', 'issued_at' => $now, 'document_id' => $receipt->id]);
 
@@ -133,10 +145,13 @@ class ReceiptPostingService
             foreach ($invoiceIds as $invoiceId) {
                 $input = $invoiceInputs->get($invoiceId);
                 $invoice = $invoices->get($invoiceId);
-                $prior = ReceiptAllocation::where('invoice_id', $invoiceId)->get()->map(fn (ReceiptAllocation $row) => [
+                $postedAllocations = ReceiptAllocation::where('invoice_id', $invoiceId)
+                    ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))
+                    ->get();
+                $prior = $postedAllocations->map(fn (ReceiptAllocation $row) => [
                     'type' => 'CASH', 'status' => 'POSTED', 'amount' => $row->cash_applied_amount,
                 ])->all();
-                foreach (ReceiptAllocation::where('invoice_id', $invoiceId)->get() as $row) {
+                foreach ($postedAllocations as $row) {
                     $prior[] = ['type' => 'WITHHOLDING', 'status' => 'POSTED', 'amount' => $row->withholding_applied_amount];
                 }
                 $applications = collect($input['withholding_applications'] ?? [])->map(function (array $application) use ($certificates): array {
@@ -174,8 +189,9 @@ class ReceiptPostingService
             $receipt->update(['cash_received_amount' => $cashReceived, 'withholding_received_amount' => $withholdingReceived, 'applied_amount' => $appliedTotal, 'unapplied_amount' => $unapplied]);
             $source->update(['receipt_id' => $receipt->id]);
             $snapshot = $receipt->fresh(['tenders', 'allocations.invoice', 'withholdingApplications.certificate', 'series'])->toArray();
-            $this->revisionService->createRevision($receipt->organization_id, $receipt->location_id, 'RECEIPT', $receipt->id, $actor, $snapshot, "Collection receipt posted with number {$receipt->receipt_number}");
-            AuditEvent::create(['organization_id' => $receipt->organization_id, 'location_id' => $receipt->location_id, 'event_type' => 'RECEIPT_POSTED', 'aggregate_type' => 'RECEIPT', 'aggregate_id' => $receipt->id, 'aggregate_version' => 1, 'actor_type' => 'user', 'actor_id' => $actor->id, 'permission_snapshot' => 'receipts:post', 'occurred_at' => $now, 'business_date' => $receipt->business_date, 'reason' => "Allocated collection receipt {$receipt->receipt_number}", 'metadata' => ['source_type' => $source->source_type, 'source_key' => $source->source_key, 'applied_amount' => $appliedTotal, 'unapplied_amount' => $unapplied, 'period_code' => $period->period_code, 'backdate_authorization_id' => $backdateAuthorization?->id]]);
+            $label = $receipt->isAcknowledgement() ? 'Acknowledgement receipt' : 'Collection receipt';
+            $this->revisionService->createRevision($receipt->organization_id, $receipt->location_id, 'RECEIPT', $receipt->id, $actor, $snapshot, "{$label} posted with number {$receipt->receipt_number}");
+            AuditEvent::create(['organization_id' => $receipt->organization_id, 'location_id' => $receipt->location_id, 'event_type' => 'RECEIPT_POSTED', 'aggregate_type' => 'RECEIPT', 'aggregate_id' => $receipt->id, 'aggregate_version' => 1, 'actor_type' => 'user', 'actor_id' => $actor->id, 'permission_snapshot' => 'receipts:post', 'occurred_at' => $now, 'business_date' => $receipt->business_date, 'reason' => "Allocated {$label} {$receipt->receipt_number}", 'metadata' => ['source_type' => $source->source_type, 'source_key' => $source->source_key, 'receipt_kind' => $receiptKind, 'counts_as_official_receipt' => $countsAsOfficial, 'applied_amount' => $appliedTotal, 'unapplied_amount' => $unapplied, 'period_code' => $period->period_code, 'backdate_authorization_id' => $backdateAuthorization?->id]]);
 
             return $receipt->fresh(['tenders', 'allocations.invoice', 'withholdingApplications.certificate', 'series']);
         });
@@ -185,12 +201,50 @@ class ReceiptPostingService
         return $receipt->fresh(['tenders', 'allocations.invoice', 'withholdingApplications.certificate', 'series', 'canonicalArtifact.snapshot']);
     }
 
-    protected function resolveSeries(int $organizationId, ?int $seriesId): DocumentSeries
+    /**
+     * Receipt payer may be the portal customer while invoice.customer_id remains
+     * a walk-in shell after an approved claim link.
+     */
+    protected function customerOwnsPostedInvoice(Customer $customer, Invoice $invoice): bool
     {
-        $query = DocumentSeries::where('organization_id', $organizationId)->where('document_type', 'COLLECTION_RECEIPT')->where('is_active', true);
+        if ((int) $invoice->customer_id === (int) $customer->id) {
+            return true;
+        }
+
+        if (! $invoice->walk_in_customer_id) {
+            return false;
+        }
+
+        return WalkInCustomer::whereKey($invoice->walk_in_customer_id)
+            ->where('customer_id', $customer->id)
+            ->exists();
+    }
+
+    protected function resolveReceiptKind(?string $kind): string
+    {
+        $normalized = strtoupper(trim((string) ($kind ?: Receipt::KIND_OFFICIAL)));
+        if (! in_array($normalized, Receipt::KINDS, true)) {
+            throw ValidationException::withMessages([
+                'receipt_kind' => ['Receipt kind must be OFFICIAL or ACKNOWLEDGEMENT.'],
+            ]);
+        }
+
+        return $normalized;
+    }
+
+    protected function resolveSeries(int $organizationId, string $documentType, ?int $seriesId): DocumentSeries
+    {
+        $query = DocumentSeries::where('organization_id', $organizationId)
+            ->where('document_type', $documentType)
+            ->where('is_active', true);
         $series = $seriesId ? $query->whereKey($seriesId)->lockForUpdate()->first() : $query->lockForUpdate()->first();
         if (! $series) {
-            throw ValidationException::withMessages(['series_id' => ['No active collection receipt series is configured for this organization.']]);
+            $label = $documentType === 'ACKNOWLEDGEMENT_RECEIPT'
+                ? 'acknowledgement receipt'
+                : 'collection receipt / official receipt';
+            throw ValidationException::withMessages([
+                'series_id' => ["No active {$label} series is configured for this organization."],
+            ]);
         }
 
         return $series;

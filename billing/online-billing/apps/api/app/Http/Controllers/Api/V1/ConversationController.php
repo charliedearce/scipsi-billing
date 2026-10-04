@@ -2,13 +2,21 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Events\ConversationReadEvent;
 use App\Events\DataRefreshEvent;
 use App\Events\NewChatMessageEvent;
 use App\Http\Controllers\Controller;
+use App\Models\BillClaimRequest;
+use App\Models\BillingRequest;
 use App\Models\ChatMessage;
 use App\Models\Conversation;
 use App\Models\ConversationParticipant;
+use App\Models\InAppNotification;
+use App\Models\Invoice;
+use App\Models\Receipt;
 use App\Models\User;
+use App\Services\Communications\ConversationService;
+use App\Support\SafeBroadcast;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,30 +24,31 @@ use Illuminate\Validation\Rule;
 
 class ConversationController extends Controller
 {
+    public function __construct(
+        protected ConversationService $conversationService,
+    ) {}
+
     /**
      * List conversations accessible to the current user.
+     * Visibility is participant-scoped: users only see threads they belong to.
      */
     public function index(Request $request): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
-        $isStaff = $user->hasPermission('conversations:read') && ! $user->hasRole('Customer');
 
-        $query = Conversation::query()
-            ->with(['customer:id,name,email', 'participants.user:id,name,email'])
-            ->withCount(['messages']);
-
-        if (! $user->hasRole('Administrator')) {
-            $query->where('organization_id', $user->organization_id);
+        if ($user->hasRole('PPA user')) {
+            abort(403, 'PPA users are not permitted to access customer chat conversations.');
         }
 
-        if (! $isStaff) {
-            // Customers only see conversations where they are the customer or a participant
-            $query->where(function ($q) use ($user) {
+        $query = Conversation::query()
+            ->where('organization_id', $user->organization_id)
+            ->with(['customer:id,name,email', 'participants.user:id,name,email'])
+            ->withCount(['messages'])
+            ->where(function ($q) use ($user) {
                 $q->where('customer_id', $user->id)
                     ->orWhereHas('participants', fn ($pq) => $pq->where('user_id', $user->id));
             });
-        }
 
         if ($request->filled('status')) {
             $query->where('status', $request->query('status'));
@@ -159,22 +168,138 @@ class ConversationController extends Controller
                         'last_read_at' => now(),
                     ]);
 
-                NewChatMessageEvent::dispatch($message);
+                SafeBroadcast::dispatchAfterCommit(new NewChatMessageEvent($message));
             }
 
-            DataRefreshEvent::dispatch(
+            SafeBroadcast::dispatchAfterCommit(new DataRefreshEvent(
                 $user->organization_id,
                 'conversations',
                 'conversation',
                 $conversation->id,
                 'created'
-            );
+            ));
 
             return response()->json([
                 'message' => 'Conversation created successfully.',
                 'data' => $conversation->load(['customer:id,name,email', 'participants.user:id,name,email']),
             ], 201);
         });
+    }
+
+    /**
+     * Find or create the open conversation for a billing request (W27 / chat entry points).
+     */
+    public function ensureForBillingRequest(Request $request, int $billingRequestId): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $billingRequest = BillingRequest::query()
+            ->where('organization_id', $user->organization_id)
+            ->findOrFail($billingRequestId);
+
+        if ($user->hasRole('PPA user')) {
+            abort(403, 'PPA users are not permitted to access customer chat conversations.');
+        }
+
+        $isOwner = (int) $billingRequest->created_by_user_id === (int) $user->id;
+        $catering = $billingRequest->cateringTeller();
+        $cateringId = $catering ? (int) $catering['id'] : null;
+        $isAssigned = (int) $billingRequest->assigned_to_user_id === (int) $user->id;
+        $isCatering = $cateringId !== null && $cateringId === (int) $user->id;
+
+        $existing = Conversation::query()
+            ->where('organization_id', $billingRequest->organization_id)
+            ->where('context_type', 'billing_request')
+            ->where('context_id', $billingRequest->id)
+            ->where('status', 'open')
+            ->first();
+        $isParticipant = $existing?->isParticipant($user->id) ?? false;
+
+        if (! $isOwner && ! $isAssigned && ! $isCatering && ! $isParticipant) {
+            abort(403, 'Only the customer and the assigned/catering teller may open this billing conversation.');
+        }
+
+        $staff = (! $user->hasRole('Customer') && ($isAssigned || $isCatering)) ? $user : null;
+        $conversation = $this->conversationService->findOrCreateForBillingRequest($billingRequest, $staff);
+
+        return response()->json([
+            'message' => 'Conversation ready.',
+            'data' => $conversation,
+        ]);
+    }
+
+    /**
+     * Find or create the open conversation for a bill claim (discrepancy chat with creating teller).
+     */
+    public function ensureForBillClaim(Request $request, int $id): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $claim = BillClaimRequest::query()
+            ->where('organization_id', $user->organization_id)
+            ->findOrFail($id);
+
+        if ($user->hasRole('PPA user')) {
+            abort(403, 'PPA users are not permitted to access customer chat conversations.');
+        }
+
+        $conversation = $this->conversationService->findOrCreateForBillClaim($claim, $user);
+
+        return response()->json([
+            'message' => 'Conversation ready.',
+            'data' => $conversation,
+        ]);
+    }
+
+    /**
+     * Find or create the open conversation for a bill.
+     * A portal bill reuses its billing-request thread.
+     */
+    public function ensureForInvoice(Request $request, int $id): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $invoice = Invoice::query()
+            ->where('organization_id', $user->organization_id)
+            ->findOrFail($id);
+
+        if ($user->hasRole('PPA user')) {
+            abort(403, 'PPA users are not permitted to access customer chat conversations.');
+        }
+
+        $conversation = $this->conversationService->findOrCreateForInvoice($invoice, $user);
+
+        return response()->json([
+            'message' => 'Conversation ready.',
+            'data' => $conversation,
+        ]);
+    }
+
+    /**
+     * Find or create the open conversation for a posted receipt.
+     */
+    public function ensureForReceipt(Request $request, int $id): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $receipt = Receipt::query()
+            ->where('organization_id', $user->organization_id)
+            ->findOrFail($id);
+
+        if ($user->hasRole('PPA user')) {
+            abort(403, 'PPA users are not permitted to access customer chat conversations.');
+        }
+
+        $conversation = $this->conversationService->findOrCreateForReceipt($receipt, $user);
+
+        return response()->json([
+            'message' => 'Conversation ready.',
+            'data' => $conversation,
+        ]);
     }
 
     /**
@@ -215,6 +340,12 @@ class ConversationController extends Controller
         $messages = $query->orderBy('created_at', 'asc')
             ->paginate($request->integer('per_page', 50));
 
+        // Highest read cursor of any other participant (Messenger-style seen).
+        $peerLastReadMessageId = ConversationParticipant::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', '!=', $user->id)
+            ->max('last_read_message_id');
+
         return response()->json([
             'data' => $messages->items(),
             'meta' => [
@@ -222,6 +353,7 @@ class ConversationController extends Controller
                 'per_page' => $messages->perPage(),
                 'total' => $messages->total(),
                 'last_page' => $messages->lastPage(),
+                'peer_last_read_message_id' => $peerLastReadMessageId ? (int) $peerLastReadMessageId : null,
             ],
         ]);
     }
@@ -256,6 +388,11 @@ class ConversationController extends Controller
             ], 403);
         }
 
+        // Staff replies to customers use message_type customer (visible); staff_note is internal-only
+        if (! $user->hasRole('Customer') && $messageType !== 'staff_note' && $messageType !== 'system') {
+            $messageType = 'customer';
+        }
+
         return DB::transaction(function () use ($user, $conversation, $validated, $messageType) {
             $message = ChatMessage::create([
                 'conversation_id' => $conversation->id,
@@ -279,16 +416,23 @@ class ConversationController extends Controller
                 'last_read_at' => now(),
             ]);
 
-            // Dispatch broadcast event after transaction commits
-            NewChatMessageEvent::dispatch($message);
+            // Wake-up only; never fail the durable message write if Reverb is down.
+            SafeBroadcast::dispatchAfterCommit(new NewChatMessageEvent($message));
 
-            DataRefreshEvent::dispatch(
+            $this->conversationService->notifyParticipantsOfMessage(
+                $conversation->fresh(),
+                $user,
+                $validated['body'],
+                $messageType,
+            );
+
+            SafeBroadcast::dispatchAfterCommit(new DataRefreshEvent(
                 $conversation->organization_id,
                 'conversations',
                 'conversation',
                 $conversation->id,
                 'updated'
-            );
+            ));
 
             return response()->json([
                 'message' => 'Message sent successfully.',
@@ -310,7 +454,7 @@ class ConversationController extends Controller
 
         $latestMessage = ChatMessage::where('conversation_id', $conversation->id)->latest('id')->first();
 
-        ConversationParticipant::updateOrCreate([
+        $participant = ConversationParticipant::updateOrCreate([
             'conversation_id' => $conversation->id,
             'user_id' => $user->id,
         ], [
@@ -319,8 +463,31 @@ class ConversationController extends Controller
             'last_read_at' => now(),
         ]);
 
+        SafeBroadcast::dispatch(new ConversationReadEvent($participant->fresh() ?? $participant));
+
+        // Focusing the thread also clears related chat bell notifications for this conversation.
+        $notificationsMarked = InAppNotification::query()
+            ->where('user_id', $user->id)
+            ->where('type', 'chat_message')
+            ->unread()
+            ->where(function ($query) use ($conversation) {
+                $query->where('data->conversation_id', $conversation->id)
+                    ->orWhere('data->conversation_id', (string) $conversation->id);
+            })
+            ->update([
+                'is_read' => true,
+                'read_at' => now(),
+            ]);
+
         return response()->json([
             'message' => 'Conversation marked as read.',
+            'data' => [
+                'conversation_id' => $conversation->id,
+                'user_id' => $user->id,
+                'last_read_message_id' => $participant->last_read_message_id,
+                'last_read_at' => $participant->last_read_at?->toIso8601String(),
+                'notifications_marked' => $notificationsMarked,
+            ],
         ]);
     }
 
@@ -360,13 +527,10 @@ class ConversationController extends Controller
 
     /**
      * Internal authorization check for conversation access.
+     * Chat content is participant-scoped: Administrator/Teller roles alone do not grant access.
      */
     private function authorizeConversationAccess(User $user, Conversation $conversation): void
     {
-        if ($user->hasRole('Administrator')) {
-            return;
-        }
-
         // PPA users are explicitly blocked from conversations
         if ($user->hasRole('PPA user')) {
             abort(403, 'PPA users are not permitted to access customer chat conversations.');
@@ -376,13 +540,7 @@ class ConversationController extends Controller
             abort(403, 'Cross-organization conversation access denied.');
         }
 
-        // If staff with conversations:read permission, allow
-        if ($user->hasPermission('conversations:read') && ! $user->hasRole('Customer')) {
-            return;
-        }
-
-        // If customer, must be the conversation customer or a participant
-        if ($conversation->customer_id === $user->id || $conversation->isParticipant($user->id)) {
+        if ((int) $conversation->customer_id === (int) $user->id || $conversation->isParticipant($user->id)) {
             return;
         }
 

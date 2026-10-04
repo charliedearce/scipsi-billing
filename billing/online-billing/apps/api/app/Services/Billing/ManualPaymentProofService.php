@@ -3,9 +3,9 @@
 namespace App\Services\Billing;
 
 use App\Models\AuditEvent;
+use App\Models\BillingRequest;
 use App\Models\Customer;
 use App\Models\CustomerUserLink;
-use App\Models\InAppNotification;
 use App\Models\Invoice;
 use App\Models\ManualPaymentSubmission;
 use App\Models\ManualPaymentSubmissionEvent;
@@ -18,6 +18,8 @@ use App\Models\PrivateFileVersion;
 use App\Models\Receipt;
 use App\Models\ReceiptAllocation;
 use App\Models\User;
+use App\Models\WalkInCustomer;
+use App\Services\Notifications\InAppNotificationPublisher;
 use App\Services\Sms\NotificationEventRecorder;
 use App\Services\Sms\SmsDeliveryOrchestrator;
 use Carbon\Carbon;
@@ -40,28 +42,39 @@ class ManualPaymentProofService
         protected BankTransferSettlementReferenceService $bankTransferReferences,
         protected SmsDeliveryOrchestrator $smsOrchestrator,
         protected NotificationEventRecorder $notificationEvents,
+        protected InAppNotificationPublisher $notifications,
     ) {}
 
     /** @return array<int, array<string, mixed>> */
     public function portalBills(User $actor, int $customerId): array
     {
         $customer = $this->assertActiveCustomerAccess($actor, $customerId);
-        $invoices = Invoice::where('organization_id', $actor->organization_id)
-            ->where('customer_id', $customer->id)
-            ->where('status', 'POSTED')
-            ->with(['receiptAllocations' => fn ($query) => $query
-                ->whereHas('receipt', fn ($receipt) => $receipt->where('status', 'POSTED'))
-                ->with('receipt:id,receipt_number,business_date,status')])
+        $invoices = $this->portalVisiblePostedInvoicesQuery($actor, $customer)
+            ->with([
+                'billingRequest',
+                'receiptAllocations' => fn ($query) => $query
+                    ->whereHas('receipt', fn ($receipt) => $receipt->where('status', 'POSTED'))
+                    ->with(['receipt.canonicalArtifact']),
+            ])
             ->orderByDesc('business_date')
             ->orderByDesc('id')
             ->get();
 
         return $invoices->map(function (Invoice $invoice): array {
             $applied = '0.00';
+            $paidAt = null;
             foreach ($invoice->receiptAllocations as $allocation) {
                 $applied = bcadd($applied, (string) $allocation->applied_amount, 2);
+                $receiptPosted = $allocation->receipt?->posted_at;
+                if ($receiptPosted && ($paidAt === null || $receiptPosted->lt($paidAt))) {
+                    $paidAt = $receiptPosted;
+                }
             }
             $outstanding = $this->positiveDifference((string) $invoice->total_charge_amount, $applied);
+            $request = $invoice->billingRequest;
+            if ($request && ! $request->relationLoaded('events')) {
+                $request->load(['events', 'assignedTeller:id,name']);
+            }
 
             return [
                 'id' => $invoice->id,
@@ -73,14 +86,166 @@ class ManualPaymentProofService
                 'outstanding_amount' => $outstanding,
                 'lock_version' => $invoice->lock_version,
                 'status' => $invoice->status,
-                'receipt_history' => $invoice->receiptAllocations->map(fn (ReceiptAllocation $allocation) => [
-                    'receipt_id' => $allocation->receipt_id,
-                    'receipt_number' => $allocation->receipt?->receipt_number,
-                    'business_date' => $allocation->receipt?->business_date?->toDateString(),
-                    'applied_amount' => (string) $allocation->applied_amount,
-                ])->values()->all(),
+                'billing_request_id' => $request?->id,
+                'catering_teller' => $request?->cateringTeller(),
+                'timeline' => [
+                    'requested_at' => ($request?->initial_submitted_at ?? $request?->submitted_at)?->toIso8601String(),
+                    'bill_approved_at' => $invoice->posted_at?->toIso8601String(),
+                    'paid_at' => $paidAt?->toIso8601String(),
+                ],
+                'receipt_history' => $this->mapReceiptHistory($invoice->receiptAllocations),
             ];
         })->all();
+    }
+
+    /**
+     * Full posted-bill detail for an authorized portal customer (line items, snapshots, PDF flag).
+     */
+    public function portalBillDetail(User $actor, int $customerId, int $invoiceId): array
+    {
+        $customer = $this->assertActiveCustomerAccess($actor, $customerId);
+        $invoice = $this->portalVisiblePostedInvoicesQuery($actor, $customer)
+            ->with([
+                'items.pricingSnapshot',
+                'canonicalArtifact',
+                'billingRequest',
+                'receiptAllocations' => fn ($query) => $query
+                    ->whereHas('receipt', fn ($receipt) => $receipt->where('status', 'POSTED'))
+                    ->with(['receipt.canonicalArtifact']),
+            ])
+            ->findOrFail($invoiceId);
+
+        $applied = '0.00';
+        $paidAt = null;
+        foreach ($invoice->receiptAllocations as $allocation) {
+            $applied = bcadd($applied, (string) $allocation->applied_amount, 2);
+            $receiptPosted = $allocation->receipt?->posted_at;
+            if ($receiptPosted && ($paidAt === null || $receiptPosted->lt($paidAt))) {
+                $paidAt = $receiptPosted;
+            }
+        }
+        $outstanding = $this->positiveDifference((string) $invoice->total_charge_amount, $applied);
+        $artifact = $invoice->canonicalArtifact;
+        $pdfReady = $artifact
+            && in_array($artifact->status, ['RENDERED', 'FAILED'], true)
+            && ($artifact->status === 'FAILED' || $artifact->existsOnDisk());
+        $request = $invoice->billingRequest ?? $invoice->billingRequests()->first();
+        if ($request) {
+            $request->load([
+                'events',
+                'assignedTeller:id,name',
+                'invoices.receiptAllocations' => fn ($query) => $query
+                    ->whereHas('receipt', fn ($receipt) => $receipt->where('status', 'POSTED')),
+                'invoices.receiptAllocations.receipt:id,status,posted_at',
+            ]);
+        }
+        $cateringTeller = $request?->cateringTeller();
+
+        return [
+            'id' => $invoice->id,
+            'invoice_number' => $invoice->invoice_number,
+            'business_date' => $invoice->business_date?->toDateString(),
+            'posted_at' => $invoice->posted_at?->toIso8601String(),
+            'currency' => $invoice->currency,
+            'status' => $invoice->status,
+            'lock_version' => $invoice->lock_version,
+            'notes' => $invoice->notes,
+            'shipment' => [
+                'vessel_name' => (string) ($invoice->vessel_name ?? ''),
+                'voyage' => (string) ($invoice->voyage ?? ''),
+                'movement_type' => in_array($invoice->movement_type, ['IN', 'OUT'], true) ? $invoice->movement_type : '',
+                'route_type' => in_array($invoice->route_type, ['DOMESTIC', 'FOREIGN'], true) ? $invoice->route_type : '',
+            ],
+            'billing_request_id' => $request?->id,
+            'transaction_no' => $request?->transaction_no,
+            'catering_teller' => $cateringTeller,
+            'request_progress' => $request?->progress(null, $cateringTeller),
+            'timeline' => [
+                'requested_at' => ($request?->initial_submitted_at ?? $request?->submitted_at)?->toIso8601String(),
+                'bill_approved_at' => $invoice->posted_at?->toIso8601String(),
+                'paid_at' => $paidAt?->toIso8601String(),
+            ],
+            'buyer' => [
+                'name' => $invoice->buyer_snapshot_name,
+                'trade_name' => $invoice->buyer_snapshot_trade_name,
+                'tin' => $invoice->buyer_snapshot_tin,
+                'branch_code' => $invoice->buyer_snapshot_branch_code,
+                'tax_classification' => $invoice->buyer_snapshot_tax_classification,
+                'address' => $invoice->buyer_snapshot_address,
+                'email' => $invoice->buyer_snapshot_email,
+                'phone' => $invoice->buyer_snapshot_phone,
+            ],
+            'amounts' => [
+                'base_gross_amount' => (string) $invoice->base_gross_amount,
+                'fuel_surcharge_amount' => (string) $invoice->fuel_surcharge_amount,
+                'gross_amount' => (string) $invoice->gross_amount,
+                'ppa_amount' => (string) $invoice->ppa_amount,
+                'discount_amount' => (string) $invoice->discount_amount,
+                'net_amount' => (string) $invoice->net_amount,
+                'tax_amount' => (string) $invoice->tax_amount,
+                'total_charge_amount' => (string) $invoice->total_charge_amount,
+                'applied_amount' => $applied,
+                'outstanding_amount' => $outstanding,
+            ],
+            'items' => $invoice->items->sortBy('line_number')->values()->map(fn ($item) => [
+                'line_number' => $item->line_number,
+                'description' => $item->description,
+                'tariff_code' => $item->pricingSnapshot?->tariff_code,
+                'quantity' => (string) $item->quantity,
+                'unit_rate' => (string) $item->unit_rate,
+                'base_gross_amount' => (string) $item->base_gross_amount,
+                'fuel_surcharge_amount' => (string) $item->fuel_surcharge_amount,
+                'gross_amount' => (string) $item->gross_amount,
+                'ppa_amount' => (string) $item->ppa_amount,
+                'discount_amount' => (string) $item->discount_amount,
+                'net_amount' => (string) $item->net_amount,
+                'tax_amount' => (string) $item->tax_amount,
+                'total_charge_amount' => (string) $item->total_charge_amount,
+                'tax_treatment' => $item->pricingSnapshot?->tax_treatment_key,
+            ])->all(),
+            'receipt_history' => $this->mapReceiptHistory($invoice->receiptAllocations),
+            'pdf_available' => $pdfReady,
+            'source_attachments' => $this->portalSourceAttachments($actor->organization_id, $customer->id, $invoice->id),
+        ];
+    }
+
+    /**
+     * Customer-owned billing-request files linked to this posted invoice (for portal tracking).
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function portalSourceAttachments(int $organizationId, int $customerId, int $invoiceId): array
+    {
+        $request = BillingRequest::where('organization_id', $organizationId)
+            ->where('customer_id', $customerId)
+            ->where(function ($query) use ($invoiceId) {
+                $query->where('invoice_id', $invoiceId)
+                    ->orWhereHas('invoiceLinks', fn ($q) => $q->where('invoice_id', $invoiceId));
+            })
+            ->with(['documents.documentType', 'documents.privateFile.latestVersion'])
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $request) {
+            return [];
+        }
+
+        return $request->documents->map(function ($doc) use ($request) {
+            $version = $doc->privateFile?->latestVersion;
+
+            return [
+                'billing_request_id' => $request->id,
+                'transaction_no' => $request->transaction_no,
+                'document_id' => $doc->id,
+                'document_type_name' => $doc->documentType?->name,
+                'private_file_id' => $doc->private_file_id,
+                'original_name' => $version?->original_name,
+                'mime_type' => $version?->mime_type,
+                'scan_status' => $version?->scan_status,
+                'review_status' => $doc->review_status,
+                'version_number' => $version?->version_number,
+            ];
+        })->values()->all();
     }
 
     /** @param array{payment_group_id:int,proof_file_id:int,declared_reference?:?string} $data */
@@ -327,7 +492,11 @@ class ManualPaymentProofService
                 $paymentTenderType,
                 $paymentTenderStatus,
             );
-            $approvalFingerprint = $this->approvalFingerprint($data['confirmed_reference'] ?? null, $postingAllocations);
+            $approvalFingerprint = $this->approvalFingerprint(
+                $data['confirmed_reference'] ?? null,
+                $postingAllocations,
+                $data['receipt_kind'] ?? Receipt::KIND_OFFICIAL,
+            );
 
             if ($locked->status === ManualPaymentSubmission::STATUS_APPROVED && $locked->receipt_id) {
                 if (! hash_equals((string) $locked->approval_payload_fingerprint, $approvalFingerprint)) {
@@ -367,6 +536,7 @@ class ManualPaymentProofService
                 'customer_id' => $locked->customer_id,
                 'currency' => $locked->currency,
                 'payer_name' => $locked->customer->name,
+                'receipt_kind' => $data['receipt_kind'] ?? Receipt::KIND_OFFICIAL,
                 'allocations' => $postingAllocations,
             ]);
             if ($normalizedBankReference) {
@@ -563,7 +733,10 @@ class ManualPaymentProofService
     /** @param array{expected_invoice_lock_version:int,requested_amount:string} $input */
     protected function assertInvoiceSelectable(Invoice $invoice, Customer $customer, array $input, string $currency): void
     {
-        if ($invoice->status !== 'POSTED' || $invoice->customer_id !== $customer->id || $invoice->currency !== strtoupper($currency)) {
+        if ($invoice->status !== 'POSTED' || $invoice->currency !== strtoupper($currency)) {
+            throw ValidationException::withMessages(['allocations' => ["Invoice {$invoice->id} is not an eligible posted invoice for this customer/currency."]]);
+        }
+        if (! $this->customerOwnsPostedInvoice($customer, $invoice)) {
             throw ValidationException::withMessages(['allocations' => ["Invoice {$invoice->id} is not an eligible posted invoice for this customer/currency."]]);
         }
         if ($invoice->lock_version !== (int) $input['expected_invoice_lock_version']) {
@@ -576,6 +749,66 @@ class ManualPaymentProofService
         if (bccomp($this->decimal($input['requested_amount']), $outstanding, 2) !== 0) {
             throw ValidationException::withMessages(['allocations' => ["Invoice {$invoice->id} must be submitted for its full current balance of {$outstanding}."]]);
         }
+    }
+
+    /**
+     * Posted invoices visible to a portal customer: owned directly, or walk-in bills
+     * linked to them after claim (invoice.customer_id may remain the shell FK).
+     */
+    protected function portalVisiblePostedInvoicesQuery(User $actor, Customer $customer)
+    {
+        $walkInIds = WalkInCustomer::where('organization_id', $actor->organization_id)
+            ->where('customer_id', $customer->id)
+            ->pluck('id');
+
+        return Invoice::where('organization_id', $actor->organization_id)
+            ->where('status', 'POSTED')
+            ->where(function ($query) use ($customer, $walkInIds): void {
+                $query->where('customer_id', $customer->id);
+                if ($walkInIds->isNotEmpty()) {
+                    $query->orWhereIn('walk_in_customer_id', $walkInIds);
+                }
+            });
+    }
+
+    protected function customerOwnsPostedInvoice(Customer $customer, Invoice $invoice): bool
+    {
+        if ((int) $invoice->customer_id === (int) $customer->id) {
+            return true;
+        }
+
+        if (! $invoice->walk_in_customer_id) {
+            return false;
+        }
+
+        return WalkInCustomer::whereKey($invoice->walk_in_customer_id)
+            ->where('customer_id', $customer->id)
+            ->exists();
+    }
+
+    /**
+     * @param  Collection<int, ReceiptAllocation>|\Illuminate\Database\Eloquent\Collection<int, ReceiptAllocation>  $allocations
+     * @return array<int, array<string, mixed>>
+     */
+    protected function mapReceiptHistory($allocations): array
+    {
+        return $allocations->map(function (ReceiptAllocation $allocation): array {
+            $receipt = $allocation->receipt;
+            $artifact = $receipt?->canonicalArtifact;
+
+            return [
+                'receipt_id' => $allocation->receipt_id,
+                'receipt_number' => $receipt?->receipt_number,
+                'receipt_kind' => $receipt?->receipt_kind ?? Receipt::KIND_OFFICIAL,
+                'counts_as_official_receipt' => (bool) ($receipt?->counts_as_official_receipt ?? true),
+                'business_date' => $receipt?->business_date?->toDateString(),
+                'posted_at' => $receipt?->posted_at?->toIso8601String(),
+                'applied_amount' => (string) $allocation->applied_amount,
+                'pdf_available' => $artifact
+                    && in_array($artifact->status, ['RENDERED', 'FAILED'], true)
+                    && ($artifact->status === 'FAILED' || $artifact->existsOnDisk()),
+            ];
+        })->values()->all();
     }
 
     /** @param Collection<int, ManualPaymentSubmissionItem> $items
@@ -669,10 +902,11 @@ class ManualPaymentProofService
     }
 
     /** @param array<int, array<string, mixed>> $postingAllocations */
-    protected function approvalFingerprint(?string $confirmedReference, array $postingAllocations): string
+    protected function approvalFingerprint(?string $confirmedReference, array $postingAllocations, string $receiptKind = Receipt::KIND_OFFICIAL): string
     {
         return hash('sha256', (string) json_encode([
             'confirmed_reference' => $confirmedReference,
+            'receipt_kind' => strtoupper($receiptKind),
             'allocations' => $postingAllocations,
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
@@ -712,15 +946,14 @@ class ManualPaymentProofService
     /** @param array<string, mixed> $data */
     protected function notifyCustomer(ManualPaymentSubmission $submission, string $title, string $body, array $data): void
     {
-        InAppNotification::create([
-            'organization_id' => $submission->organization_id,
-            'user_id' => $submission->submitted_by_user_id,
-            'type' => 'PAYMENT',
-            'title' => $title,
-            'body' => $body,
-            'data' => $data,
-            'is_read' => false,
-        ]);
+        $this->notifications->publish(
+            (int) $submission->organization_id,
+            (int) $submission->submitted_by_user_id,
+            'PAYMENT',
+            $title,
+            $body,
+            $data,
+        );
     }
 
     /**

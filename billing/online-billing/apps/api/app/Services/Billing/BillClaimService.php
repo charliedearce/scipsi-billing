@@ -6,11 +6,12 @@ use App\Events\DataRefreshEvent;
 use App\Models\BillClaimEvent;
 use App\Models\BillClaimRequest;
 use App\Models\Customer;
-use App\Models\InAppNotification;
 use App\Models\Invoice;
 use App\Models\NotificationEvent;
 use App\Models\User;
+use App\Services\Notifications\InAppNotificationPublisher;
 use App\Services\Sms\SmsDeliveryOrchestrator;
+use App\Support\SafeBroadcast;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -43,6 +44,7 @@ class BillClaimService
     public function __construct(
         protected WalkInBillingService $walkInService,
         protected SmsDeliveryOrchestrator $smsOrchestrator,
+        protected InAppNotificationPublisher $notifications,
     ) {}
 
     /**
@@ -101,6 +103,7 @@ class BillClaimService
                     ->whereIn('claim_status', [
                         BillClaimRequest::STATUS_PENDING_VERIFICATION,
                         BillClaimRequest::STATUS_PENDING_TELLER_REVIEW,
+                        BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE,
                     ])
                     ->update(['claim_status' => BillClaimRequest::STATUS_CANCELLED]);
             }
@@ -209,7 +212,7 @@ class BillClaimService
                     'created_at' => $now,
                 ]);
 
-                broadcast(new DataRefreshEvent($orgId, 'bill_claims', 'bill_claim_request', $claim->id, 'teller_review_queued'));
+                $this->broadcastClaimRefresh($claim, 'teller_review_queued');
             }
 
             // Raw code is never returned to caller — only the claim record without hash/salt
@@ -299,8 +302,13 @@ class BillClaimService
             ]);
         }
 
-        // Code correct: approve the claim inside a transaction
-        return DB::transaction(fn () => $this->approveClaim($claim, $requester->id, $now, 'Code verified successfully.'));
+        // Code correct: identity verified — customer must still preview/accept before link.
+        return DB::transaction(fn () => $this->markVerifiedForAcceptance(
+            $claim,
+            $requester->id,
+            $now,
+            'Code verified successfully.'
+        ));
     }
 
     /**
@@ -336,7 +344,12 @@ class BillClaimService
             $now = Carbon::now();
 
             if ($decision === 'APPROVE') {
-                return $this->approveClaim($claim, $staff->id, $now, $notes ?? 'Approved by staff after identity review.');
+                return $this->markVerifiedForAcceptance(
+                    $claim,
+                    $staff->id,
+                    $now,
+                    $notes ?? 'Approved by staff after identity review.'
+                );
             }
 
             // Reject
@@ -357,18 +370,17 @@ class BillClaimService
                 'created_at' => $now,
             ]);
 
-            // Notify the requester
-            InAppNotification::create([
-                'organization_id' => $claim->organization_id,
-                'user_id' => $claim->user_id,
-                'type' => 'BILL_CLAIM',
-                'title' => 'Invoice Claim Rejected',
-                'body' => "Your claim for invoice {$claim->invoice_number} was rejected. Reason: {$notes}",
-                'data' => ['bill_claim_request_id' => $claim->id],
-                'is_read' => false,
-            ]);
+            // Notify the requester (durable + Reverb wake-up)
+            $this->notifications->publish(
+                (int) $claim->organization_id,
+                (int) $claim->user_id,
+                'BILL_CLAIM',
+                'Invoice Claim Rejected',
+                "Your claim for invoice {$claim->invoice_number} was rejected. Reason: {$notes}",
+                ['bill_claim_request_id' => $claim->id],
+            );
 
-            broadcast(new DataRefreshEvent($claim->organization_id, 'bill_claims', 'bill_claim_request', $claim->id, 'rejected'));
+            $this->broadcastClaimRefresh($claim, 'rejected');
 
             return $claim->fresh(['events']);
         });
@@ -409,8 +421,158 @@ class BillClaimService
                 'created_at' => $now,
             ]);
 
-            broadcast(new DataRefreshEvent($claim->organization_id, 'bill_claims', 'bill_claim_request', $claim->id, 'cancelled'));
+            $this->broadcastClaimRefresh($claim, 'cancelled');
         });
+    }
+
+    /**
+     * Customer accepts a verified claim preview — links ownership and makes the bill payable.
+     */
+    public function acceptClaim(User $requester, BillClaimRequest $claim): BillClaimRequest
+    {
+        if ($claim->user_id !== $requester->id) {
+            throw ValidationException::withMessages([
+                'claim' => 'Claim does not belong to this user.',
+            ]);
+        }
+
+        if ($claim->claim_status !== BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE) {
+            throw ValidationException::withMessages([
+                'claim_status' => 'Only verified claims awaiting acceptance can be accepted.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($requester, $claim): BillClaimRequest {
+            return $this->approveClaim(
+                $claim,
+                $requester->id,
+                Carbon::now(),
+                'Customer accepted invoice after preview.'
+            );
+        });
+    }
+
+    /**
+     * Customer declines a verified claim preview — no ownership link.
+     */
+    public function declineClaim(User $requester, BillClaimRequest $claim, ?string $reason = null): BillClaimRequest
+    {
+        if ($claim->user_id !== $requester->id) {
+            throw ValidationException::withMessages([
+                'claim' => 'Claim does not belong to this user.',
+            ]);
+        }
+
+        if ($claim->claim_status !== BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE) {
+            throw ValidationException::withMessages([
+                'claim_status' => 'Only verified claims awaiting acceptance can be declined.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($requester, $claim, $reason): BillClaimRequest {
+            $now = Carbon::now();
+            $notes = trim((string) ($reason ?? '')) !== ''
+                ? trim((string) $reason)
+                : 'Customer declined invoice after preview.';
+
+            $claim->update([
+                'claim_status' => BillClaimRequest::STATUS_CANCELLED,
+                'resolved_at' => $now,
+                'resolved_by_user_id' => $requester->id,
+                'rejection_reason' => $notes,
+            ]);
+
+            BillClaimEvent::create([
+                'bill_claim_request_id' => $claim->id,
+                'organization_id' => $claim->organization_id,
+                'actor_id' => $requester->id,
+                'event_type' => 'DECLINED',
+                'notes' => $notes,
+                'metadata' => [
+                    'invoice_id' => $claim->invoice_id,
+                    'invoice_number' => $claim->invoice_number,
+                ],
+                'created_at' => $now,
+            ]);
+
+            $this->notifications->publish(
+                (int) $claim->organization_id,
+                (int) $claim->user_id,
+                'BILL_CLAIM',
+                'Invoice Claim Declined',
+                "You declined invoice {$claim->invoice_number}. It was not added to My Bills.",
+                [
+                    'bill_claim_request_id' => $claim->id,
+                    'invoice_id' => $claim->invoice_id,
+                ],
+            );
+
+            $this->broadcastClaimRefresh($claim, 'declined');
+
+            return $claim->fresh(['events', 'invoice']);
+        });
+    }
+
+    /**
+     * Safe invoice preview for a verified claim owner (no existence leak before verification).
+     *
+     * @return array<string, mixed>
+     */
+    public function previewClaim(User $requester, BillClaimRequest $claim): array
+    {
+        if ($claim->user_id !== $requester->id) {
+            throw ValidationException::withMessages([
+                'claim' => 'Claim does not belong to this user.',
+            ]);
+        }
+
+        if (! in_array($claim->claim_status, [
+            BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE,
+            BillClaimRequest::STATUS_APPROVED,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'claim_status' => 'Invoice preview is available after identity verification.',
+            ]);
+        }
+
+        if (! $claim->invoice_id) {
+            throw ValidationException::withMessages([
+                'invoice' => 'No invoice is attached to this claim.',
+            ]);
+        }
+
+        $invoice = Invoice::with(['items', 'createdBy:id,name', 'walkInCustomer.creator:id,name'])
+            ->findOrFail($claim->invoice_id);
+
+        $creator = $invoice->createdBy ?: $invoice->walkInCustomer?->creator;
+
+        return [
+            'claim_id' => $claim->id,
+            'claim_status' => $claim->claim_status,
+            'can_accept' => $claim->claim_status === BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE,
+            'invoice' => [
+                'id' => $invoice->id,
+                'invoice_number' => $invoice->invoice_number,
+                'business_date' => $invoice->business_date?->toDateString(),
+                'currency' => $invoice->currency,
+                'gross_amount' => (string) $invoice->gross_amount,
+                'tax_amount' => (string) $invoice->tax_amount,
+                'total_charge_amount' => (string) $invoice->total_charge_amount,
+                'buyer_name' => $invoice->buyer_snapshot_name,
+                'buyer_tin' => $invoice->buyer_snapshot_tin,
+                'buyer_address' => $invoice->buyer_snapshot_address,
+                'lines' => $invoice->items->map(fn ($item) => [
+                    'description' => $item->description ?: ('Line '.($item->line_number ?? '')),
+                    'quantity' => (string) $item->quantity,
+                    'unit_rate' => (string) ($item->unit_rate ?? ''),
+                    'line_total' => (string) ($item->total_charge_amount ?? $item->gross_amount ?? ''),
+                ])->values()->all(),
+            ],
+            'creating_teller' => $creator ? [
+                'id' => $creator->id,
+                'name' => $creator->name,
+            ] : null,
+        ];
     }
 
     /**
@@ -458,6 +620,52 @@ class BillClaimService
     // -------------------------------------------------------------------------
 
     /**
+     * Identity verified (code or teller). Customer must preview/accept before ownership link.
+     */
+    private function markVerifiedForAcceptance(
+        BillClaimRequest $claim,
+        int $resolvedByUserId,
+        Carbon $now,
+        string $notes
+    ): BillClaimRequest {
+        $claim->update([
+            'claim_status' => BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE,
+            'code_hash' => null,
+            'code_salt' => null,
+            'code_expires_at' => null,
+        ]);
+
+        BillClaimEvent::create([
+            'bill_claim_request_id' => $claim->id,
+            'organization_id' => $claim->organization_id,
+            'actor_id' => $resolvedByUserId,
+            'event_type' => 'PENDING_CUSTOMER_ACCEPTANCE',
+            'notes' => $notes,
+            'metadata' => [
+                'invoice_id' => $claim->invoice_id,
+                'invoice_number' => $claim->invoice_number,
+            ],
+            'created_at' => $now,
+        ]);
+
+        $this->notifications->publish(
+            (int) $claim->organization_id,
+            (int) $claim->user_id,
+            'BILL_CLAIM',
+            'Review your claimed invoice',
+            "Invoice {$claim->invoice_number} is ready to review. Accept it to add it to My Bills, or chat the teller if something looks wrong.",
+            [
+                'bill_claim_request_id' => $claim->id,
+                'invoice_id' => $claim->invoice_id,
+            ],
+        );
+
+        $this->broadcastClaimRefresh($claim, 'pending_customer_acceptance');
+
+        return $claim->fresh(['events', 'invoice']);
+    }
+
+    /**
      * Approve a claim: link the invoice to the customer account.
      * Security invariant: buyer snapshot on POSTED invoices is NEVER altered.
      */
@@ -503,23 +711,40 @@ class BillClaimService
             }
         }
 
-        // Notify the user
-        InAppNotification::create([
-            'organization_id' => $claim->organization_id,
-            'user_id' => $claim->user_id,
-            'type' => 'BILL_CLAIM',
-            'title' => 'Invoice Claim Approved',
-            'body' => "Invoice {$claim->invoice_number} has been linked to your account.",
-            'data' => [
+        // Notify the user (durable + Reverb wake-up)
+        $this->notifications->publish(
+            (int) $claim->organization_id,
+            (int) $claim->user_id,
+            'BILL_CLAIM',
+            'Invoice Claim Approved',
+            "Invoice {$claim->invoice_number} has been linked to your account.",
+            [
                 'bill_claim_request_id' => $claim->id,
                 'invoice_id' => $claim->invoice_id,
             ],
-            'is_read' => false,
-        ]);
+        );
 
-        broadcast(new DataRefreshEvent($claim->organization_id, 'bill_claims', 'bill_claim_request', $claim->id, 'approved'));
+        $this->broadcastClaimRefresh($claim, 'approved');
 
         return $claim->fresh(['events', 'invoice']);
+    }
+
+    /**
+     * Wake the staff review queue and only the customer who owns this claim.
+     * Reverb remains best-effort; the committed claim is always authoritative.
+     */
+    private function broadcastClaimRefresh(BillClaimRequest $claim, string $action): void
+    {
+        SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
+            (int) $claim->organization_id,
+            'bill_claims',
+            'bill_claim_request',
+            $claim->id,
+            $action,
+            (int) $claim->lock_version,
+            (int) $claim->user_id,
+            false,
+        ));
     }
 
     /**

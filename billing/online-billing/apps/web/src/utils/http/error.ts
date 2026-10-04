@@ -93,6 +93,38 @@ export class HttpError extends Error {
 }
 
 /**
+ * Prefer Laravel/API validation or domain error text when present.
+ */
+const extractApiErrorMessage = (resData: any, fallback: string): string => {
+  if (!resData || typeof resData !== 'object') {
+    return fallback
+  }
+
+  if (typeof resData.error?.message === 'string' && resData.error.message.trim()) {
+    return resData.error.message
+  }
+
+  if (resData.errors && typeof resData.errors === 'object') {
+    const firstFieldErrors = Object.values(resData.errors).find(
+      (value) => Array.isArray(value) && value.length > 0 && typeof value[0] === 'string'
+    ) as string[] | undefined
+    if (firstFieldErrors?.[0]) {
+      return firstFieldErrors[0]
+    }
+  }
+
+  if (typeof resData.message === 'string' && resData.message.trim()) {
+    return resData.message
+  }
+
+  if (typeof resData.msg === 'string' && resData.msg.trim()) {
+    return resData.msg
+  }
+
+  return fallback
+}
+
+/**
  * 获取错误消息
  * @param status 错误状态码
  * @returns 错误消息
@@ -110,7 +142,7 @@ const getErrorMessage = (status: number): string => {
     [ApiStatus.gatewayTimeout]: 'httpMsg.gatewayTimeout'
   }
 
-  return $t(errorMap[status] || 'httpMsg.internalServerError')
+  return $t(errorMap[status] || 'httpMsg.requestFailed')
 }
 
 /**
@@ -127,8 +159,8 @@ export function handleError(error: AxiosError<ErrorResponse>): never {
 
   const statusCode = error.response?.status
   const resData = error.response?.data as any
-  const errorMessage = resData?.error?.message || resData?.msg || resData?.message || error.message
   const requestConfig = error.config
+  const apiMessage = extractApiErrorMessage(resData, error.message || $t('httpMsg.requestFailed'))
 
   // 处理网络错误
   if (!error.response) {
@@ -138,10 +170,21 @@ export function handleError(error: AxiosError<ErrorResponse>): never {
     })
   }
 
+  // Validation and conflict responses should surface the server message.
+  if (statusCode === 422 || statusCode === 409 || statusCode === 403) {
+    throw new HttpError(apiMessage, statusCode, {
+      data: error.response.data,
+      url: requestConfig?.url,
+      method: requestConfig?.method?.toUpperCase()
+    })
+  }
+
   // 处理 HTTP 状态码错误
   const message = statusCode
-    ? getErrorMessage(statusCode)
-    : errorMessage || $t('httpMsg.requestFailed')
+    ? statusCode >= 500
+      ? getErrorMessage(statusCode)
+      : apiMessage || getErrorMessage(statusCode)
+    : apiMessage
   throw new HttpError(message, statusCode || ApiStatus.error, {
     data: error.response.data,
     url: requestConfig?.url,

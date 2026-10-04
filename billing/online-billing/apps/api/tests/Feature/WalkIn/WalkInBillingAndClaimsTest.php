@@ -7,9 +7,13 @@ use App\Models\BuyerProfileVersion;
 use App\Models\Customer;
 use App\Models\CustomerContactPoint;
 use App\Models\CustomerUserLink;
+use App\Models\DocumentType;
 use App\Models\Invoice;
 use App\Models\Location;
 use App\Models\Organization;
+use App\Models\PrivateFile;
+use App\Models\PrivateFileVersion;
+use App\Models\Receipt;
 use App\Models\Role;
 use App\Models\User;
 use App\Models\WalkInCustomer;
@@ -18,6 +22,7 @@ use App\Services\Billing\WalkInBillingService;
 use Carbon\Carbon;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -51,6 +56,7 @@ class WalkInBillingAndClaimsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Storage::fake('private');
         $this->seed(DatabaseSeeder::class);
 
         $this->org = Organization::where('code', 'SCIPSI')->first();
@@ -155,6 +161,82 @@ class WalkInBillingAndClaimsTest extends TestCase
         );
     }
 
+    /** @test */
+    public function test_walk_in_customer_can_be_created_with_name_only(): void
+    {
+        // Mirrors the quick-create Vue payload: optional keys omitted entirely.
+        $response = $this->actingAs($this->teller, 'sanctum')
+            ->postJson('/api/v1/teller/walk-in/customers', [
+                'location_id' => $this->location->id,
+                'buyer_name' => 'Counter Guest',
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('buyer_name', 'Counter Guest')
+            ->assertJsonPath('buyer_tin', null)
+            ->assertJsonPath('buyer_address', null);
+
+        $walkIn = WalkInCustomer::findOrFail($response->json('id'));
+        $this->assertNull($walkIn->buyer_tin);
+        $this->assertNull($walkIn->buyer_address);
+
+        $version = Customer::find($walkIn->shell_customer_id)
+            ->buyerProfile
+            ->latestVersion()
+            ->first();
+        $this->assertEquals('Counter Guest', $version->registered_name);
+        $this->assertNull($version->tin);
+        $this->assertNull($version->billing_address);
+    }
+
+    /** @test */
+    public function test_walk_in_incomplete_tin_can_be_cleared_before_post(): void
+    {
+        $walkIn = $this->createWalkIn([
+            'buyer_name' => 'Partial TIN Buyer',
+            'buyer_tin' => null,
+        ]);
+
+        // Simulate a legacy/bad capture that already has a short TIN on disk.
+        $walkIn->update(['buyer_tin' => '123123']);
+        Customer::find($walkIn->shell_customer_id)
+            ->buyerProfile
+            ->latestVersion()
+            ->first()
+            ->update(['tin' => '123123']);
+
+        $response = $this->actingAs($this->teller, 'sanctum')
+            ->patchJson("/api/v1/teller/walk-in/customers/{$walkIn->id}", [
+                'buyer_tin' => null,
+            ]);
+
+        $response->assertOk()->assertJsonPath('buyer_tin', null);
+
+        $walkIn->refresh();
+        $this->assertNull($walkIn->buyer_tin);
+        $version = Customer::find($walkIn->shell_customer_id)
+            ->buyerProfile
+            ->latestVersion()
+            ->first();
+        $this->assertNull($version->tin);
+    }
+
+    /** @test */
+    public function test_walk_in_create_rejects_incomplete_tin(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        $this->walkInService->createWalkInCustomer(
+            teller: $this->teller,
+            organizationId: $this->org->id,
+            locationId: $this->location->id,
+            buyerData: [
+                'buyer_name' => 'Bad TIN',
+                'buyer_tin' => '123123',
+            ],
+        );
+    }
+
     // =========================================================================
     // Walk-in Invoice Draft Creation
     // =========================================================================
@@ -188,9 +270,8 @@ class WalkInBillingAndClaimsTest extends TestCase
     }
 
     /** @test */
-    public function test_walk_in_invoice_draft_requires_tin_for_fiscal_vatable_posting(): void
+    public function test_walk_in_invoice_can_post_without_buyer_tin(): void
     {
-        // Walk-in customer WITHOUT TIN
         $walkIn = $this->createWalkIn([
             'buyer_name' => 'No TIN Buyer',
             'buyer_tin' => null,
@@ -199,16 +280,34 @@ class WalkInBillingAndClaimsTest extends TestCase
         $invoice = $this->walkInService->createWalkInInvoiceDraft(
             teller: $this->teller,
             walkIn: $walkIn,
-            businessDate: Carbon::today()->format('Y-m-d'),
+            businessDate: Carbon::today('Asia/Manila')->format('Y-m-d'),
         );
 
-        // The draft itself is created — fiscal readiness is validated at posting time
         $this->assertEquals('DRAFT', $invoice->status);
 
-        // Verify the buyer profile version has no TIN (will block fiscal posting)
         $customer = Customer::find($walkIn->shell_customer_id);
         $version = $customer->buyerProfile->latestVersion()->first();
         $this->assertNull($version->tin);
+
+        $this->actingAs($this->teller, 'sanctum')
+            ->putJson("/api/v1/invoices/drafts/{$invoice->id}", [
+                'expected_version' => 1,
+                'business_date' => Carbon::today('Asia/Manila')->format('Y-m-d'),
+                ...$this->invoiceShipmentPayload($this->org->id),
+                'items' => [
+                    ['tariff_code' => 'ARR_DOM', 'quantity' => 2],
+                ],
+            ])
+            ->assertOk();
+
+        $this->actingAs($this->teller, 'sanctum')
+            ->postJson("/api/v1/invoices/drafts/{$invoice->id}/post", [
+                'expected_version' => 2,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'POSTED');
+
+        $this->assertEquals('POSTED', $invoice->fresh()->status);
     }
 
     // =========================================================================
@@ -286,7 +385,7 @@ class WalkInBillingAndClaimsTest extends TestCase
     // =========================================================================
 
     /** @test */
-    public function test_correct_claim_code_approves_claim_and_links_invoice(): void
+    public function test_correct_claim_code_moves_to_pending_acceptance_then_accept_links_invoice(): void
     {
         [$walkIn, $invoice] = $this->createWalkInAndPostedInvoice(
             contactMobile: '+63912-000-0003'
@@ -299,19 +398,204 @@ class WalkInBillingAndClaimsTest extends TestCase
             invoiceNumber: $invoice->invoice_number,
         );
 
-        // Manually read raw code from DB (not available via service return)
         $rawClaim = BillClaimRequest::find($claim->id);
         $rawCode = $this->extractRawCode($rawClaim);
 
-        $approved = $this->claimService->verifyClaimCode(
+        $verified = $this->claimService->verifyClaimCode(
             requester: $this->portalUser,
             claim: $rawClaim,
             rawCode: $rawCode,
         );
 
+        $this->assertEquals(BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE, $verified->claim_status);
+        $this->assertEquals($invoice->id, $verified->invoice_id);
+        $this->assertNull($verified->resolved_at);
+
+        $preview = $this->claimService->previewClaim($this->portalUser, $verified);
+        $this->assertTrue($preview['can_accept']);
+        $this->assertEquals($invoice->invoice_number, $preview['invoice']['invoice_number']);
+
+        // Not yet on My Bills before accept.
+        $billsBefore = $this->actingAs($this->portalUser, 'sanctum')
+            ->getJson('/api/v1/portal/bills?customer_id='.$this->portalCustomer->id)
+            ->assertOk()
+            ->json('data');
+        $this->assertFalse(
+            collect($billsBefore)->contains(fn ($bill) => ($bill['invoice_number'] ?? null) === $invoice->invoice_number),
+            'Invoice must not appear on My Bills before customer accept.'
+        );
+
+        $approved = $this->claimService->acceptClaim($this->portalUser, $verified->fresh());
+
         $this->assertEquals(BillClaimRequest::STATUS_APPROVED, $approved->claim_status);
-        $this->assertEquals($invoice->id, $approved->invoice_id);
         $this->assertNotNull($approved->resolved_at);
+
+        $walkIn->refresh();
+        $this->assertEquals($this->portalCustomer->id, $walkIn->customer_id);
+        $this->assertNotNull($walkIn->linked_at);
+
+        $bills = $this->actingAs($this->portalUser, 'sanctum')
+            ->getJson('/api/v1/portal/bills?customer_id='.$this->portalCustomer->id)
+            ->assertOk()
+            ->json('data');
+        $this->assertTrue(
+            collect($bills)->contains(fn ($bill) => ($bill['invoice_number'] ?? null) === $invoice->invoice_number),
+            'Claimed walk-in invoice should appear on portal My Bills after accept.'
+        );
+
+        $this->actingAs($this->teller, 'sanctum')
+            ->getJson('/api/v1/teller/bill-claims?status=APPROVED')
+            ->assertOk()
+            ->assertJsonFragment(['invoice_number' => $invoice->invoice_number]);
+
+        // Claimed walk-in invoices keep shell customer_id; payment instructions must still allow them.
+        $invoice->update([
+            'total_charge_amount' => '250.00',
+            'gross_amount' => '250.00',
+            'net_amount' => '250.00',
+            'currency' => 'PHP',
+        ]);
+        $invoice->refresh();
+
+        $this->assertNotEquals(
+            $this->portalCustomer->id,
+            $invoice->customer_id,
+            'Regression guard: claimed walk-in invoice must keep shell customer_id.'
+        );
+
+        $group = $this->actingAs($this->portalUser, 'sanctum')
+            ->postJson('/api/v1/portal/payment-groups/manual-instruction', [
+                'customer_id' => $this->portalCustomer->id,
+                'allocations' => [[
+                    'invoice_id' => $invoice->id,
+                    'expected_invoice_lock_version' => $invoice->lock_version,
+                    'requested_amount' => '250.00',
+                ]],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'MANUAL_INSTRUCTION_ISSUED')
+            ->json('data');
+
+        $proofType = DocumentType::where('code', 'BANK_DEPOSIT_SLIP')->firstOrFail();
+        $proof = PrivateFile::create([
+            'organization_id' => $this->org->id,
+            'document_type_id' => $proofType->id,
+            'purpose' => 'PAYMENT_PROOF',
+            'uploaded_by' => $this->portalUser->id,
+            'owner_id' => $this->portalUser->id,
+            'current_version' => 1,
+            'status' => 'CLEAN',
+        ]);
+        PrivateFileVersion::create([
+            'private_file_id' => $proof->id,
+            'version_number' => 1,
+            'disk' => 'private',
+            'file_path' => "tests/payment-proofs/{$proof->id}-1.pdf",
+            'original_name' => 'walk-in-payment-proof.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 128,
+            'sha256_checksum' => hash('sha256', 'walk-in-payment-proof'),
+            'scan_status' => 'CLEAN',
+            'scan_details' => ['scanner' => 'test'],
+            'uploaded_by' => $this->portalUser->id,
+            'created_at' => now(),
+        ]);
+
+        $submission = $this->actingAs($this->portalUser, 'sanctum')
+            ->postJson('/api/v1/portal/payment-submissions', [
+                'payment_group_id' => $group['id'],
+                'proof_file_id' => $proof->id,
+                'declared_reference' => 'WALKIN-BANK-'.$invoice->id,
+            ])
+            ->assertCreated()
+            ->json('data');
+
+        $claimed = $this->actingAs($this->teller, 'sanctum')
+            ->postJson('/api/v1/teller/payment-submissions/claim-next')
+            ->assertOk()
+            ->json('data');
+        $this->assertSame($submission['id'], $claimed['id']);
+
+        $this->actingAs($this->teller, 'sanctum')
+            ->postJson("/api/v1/teller/payment-submissions/{$claimed['id']}/approve", [
+                'expected_version' => $claimed['lock_version'],
+                'confirmed_reference' => 'WALKIN-CONFIRMED-'.$invoice->id,
+                'allocations' => [[
+                    'invoice_id' => $invoice->id,
+                    'cash_amount' => '250.00',
+                    'withholding_applications' => [],
+                ]],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'APPROVED');
+
+        $this->assertDatabaseHas('receipts', [
+            'customer_id' => $this->portalCustomer->id,
+            'status' => 'POSTED',
+        ]);
+        $this->assertTrue(
+            Receipt::where('customer_id', $this->portalCustomer->id)
+                ->whereHas('allocations', fn ($query) => $query->where('invoice_id', $invoice->id))
+                ->exists(),
+            'Teller approve must post a collection receipt against the claimed walk-in invoice.'
+        );
+    }
+
+    /** @test */
+    public function test_customer_can_decline_pending_acceptance_without_linking(): void
+    {
+        [$walkIn, $invoice] = $this->createWalkInAndPostedInvoice(
+            contactMobile: '+63912-000-0033'
+        );
+        $this->addVerifiedContact($this->portalUser, $this->portalCustomer, 'mobile', '+63912-000-0033');
+
+        $claim = BillClaimRequest::find(
+            $this->claimService->initiateClaim($this->portalUser, $this->portalCustomer, $invoice->invoice_number)->id
+        );
+        $verified = $this->claimService->verifyClaimCode(
+            $this->portalUser,
+            $claim,
+            $this->extractRawCode($claim)
+        );
+
+        $declined = $this->claimService->declineClaim($this->portalUser, $verified, 'Wrong buyer name');
+
+        $this->assertEquals(BillClaimRequest::STATUS_CANCELLED, $declined->claim_status);
+        $walkIn->refresh();
+        $this->assertNull($walkIn->customer_id);
+    }
+
+    /** @test */
+    public function test_bill_claim_conversation_opens_with_creating_teller(): void
+    {
+        [$walkIn, $invoice] = $this->createWalkInAndPostedInvoice(
+            contactMobile: '+63912-000-0044'
+        );
+        $this->addVerifiedContact($this->portalUser, $this->portalCustomer, 'mobile', '+63912-000-0044');
+
+        $claim = BillClaimRequest::find(
+            $this->claimService->initiateClaim($this->portalUser, $this->portalCustomer, $invoice->invoice_number)->id
+        );
+        $this->claimService->verifyClaimCode($this->portalUser, $claim, $this->extractRawCode($claim));
+
+        $response = $this->actingAs($this->portalUser, 'sanctum')
+            ->postJson('/api/v1/conversations/for-bill-claim/'.$claim->id)
+            ->assertOk()
+            ->json('data');
+
+        $this->assertEquals('bill_claim', $response['context_type']);
+        $this->assertEquals($claim->id, $response['context_id']);
+
+        $this->assertDatabaseHas('conversation_participants', [
+            'conversation_id' => $response['id'],
+            'user_id' => $this->portalUser->id,
+            'role' => 'customer',
+        ]);
+        $this->assertDatabaseHas('conversation_participants', [
+            'conversation_id' => $response['id'],
+            'user_id' => $this->teller->id,
+            'role' => 'staff',
+        ]);
     }
 
     /** @test */
@@ -421,15 +705,18 @@ class WalkInBillingAndClaimsTest extends TestCase
 
         $this->assertEquals(BillClaimRequest::STATUS_PENDING_TELLER_REVIEW, $claim->claim_status);
 
-        $approved = $this->claimService->staffDecideClaim(
+        $verified = $this->claimService->staffDecideClaim(
             staff: $this->teller,
             claim: $claim,
             decision: 'APPROVE',
             notes: 'Customer presented valid government ID.',
         );
 
+        $this->assertEquals(BillClaimRequest::STATUS_PENDING_CUSTOMER_ACCEPTANCE, $verified->claim_status);
+
+        $approved = $this->claimService->acceptClaim($this->portalUser, $verified->fresh());
         $this->assertEquals(BillClaimRequest::STATUS_APPROVED, $approved->claim_status);
-        $this->assertEquals($this->teller->id, $approved->resolved_by_user_id);
+        $this->assertEquals($this->portalUser->id, $approved->resolved_by_user_id);
     }
 
     /** @test */
@@ -478,7 +765,8 @@ class WalkInBillingAndClaimsTest extends TestCase
             $this->claimService->initiateClaim($this->portalUser, $this->portalCustomer, 'INV-WI-ACC-001')->id
         );
         $rawCode = $this->extractRawCode($claim);
-        $this->claimService->verifyClaimCode($this->portalUser, $claim, $rawCode);
+        $verified = $this->claimService->verifyClaimCode($this->portalUser, $claim, $rawCode);
+        $this->claimService->acceptClaim($this->portalUser, $verified);
 
         // Invoice2 must NOT be auto-linked; a separate claim is required
         $this->assertDatabaseMissing('bill_claim_requests', [
@@ -506,7 +794,8 @@ class WalkInBillingAndClaimsTest extends TestCase
             $this->claimService->initiateClaim($this->portalUser, $this->portalCustomer, $invoice->invoice_number)->id
         );
         $rawCode = $this->extractRawCode($claim);
-        $this->claimService->verifyClaimCode($this->portalUser, $claim, $rawCode);
+        $verified = $this->claimService->verifyClaimCode($this->portalUser, $claim, $rawCode);
+        $this->claimService->acceptClaim($this->portalUser, $verified);
 
         // After approval: the buyer snapshot on the invoice must be unchanged
         $invoice->refresh();

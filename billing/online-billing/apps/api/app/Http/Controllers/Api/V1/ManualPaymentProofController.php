@@ -6,6 +6,7 @@ use App\Events\DataRefreshEvent;
 use App\Http\Controllers\Controller;
 use App\Models\ManualPaymentSubmission;
 use App\Services\Billing\ManualPaymentProofService;
+use App\Support\SafeBroadcast;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -20,6 +21,20 @@ class ManualPaymentProofController extends Controller
 
         return response()->json([
             'data' => $this->service->portalBills($request->user(), (int) $data['customer_id']),
+        ]);
+    }
+
+    /** GET /api/v1/portal/bills/{id}?customer_id={id} */
+    public function billShow(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate(['customer_id' => ['required', 'integer']]);
+
+        return response()->json([
+            'data' => $this->service->portalBillDetail(
+                $request->user(),
+                (int) $data['customer_id'],
+                $id
+            ),
         ]);
     }
 
@@ -120,6 +135,7 @@ class ManualPaymentProofController extends Controller
         $data = $request->validate([
             'expected_version' => ['required', 'integer', 'min:1'],
             'confirmed_reference' => ['nullable', 'string', 'max:128'],
+            'receipt_kind' => ['nullable', 'string', 'in:OFFICIAL,ACKNOWLEDGEMENT'],
             'allocations' => ['required', 'array', 'min:1'],
             'allocations.*.invoice_id' => ['required', 'integer'],
             'allocations.*.cash_amount' => ['required', 'regex:/^\d+(\.\d{1,2})?$/'],
@@ -131,8 +147,13 @@ class ManualPaymentProofController extends Controller
         $submission = $this->service->approve($submission, $request->user(), $data);
         $this->broadcastRefresh($submission, 'approved');
 
+        $kind = $submission->receipt?->receipt_kind ?? 'OFFICIAL';
+        $message = $kind === 'ACKNOWLEDGEMENT'
+            ? 'Payment proof approved and acknowledgement receipt posted. Settlement is recorded; this is not an Official Receipt.'
+            : 'Payment proof approved and collection receipt posted.';
+
         return response()->json([
-            'message' => 'Payment proof approved and collection receipt posted.',
+            'message' => $message,
             'data' => $submission,
         ]);
     }
@@ -182,18 +203,15 @@ class ManualPaymentProofController extends Controller
 
     protected function broadcastRefresh(ManualPaymentSubmission $submission, string $action): void
     {
-        try {
-            broadcast(new DataRefreshEvent(
-                $submission->organization_id,
-                'payments',
-                'manual_payment_submission',
-                $submission->id,
-                $action,
-                $submission->lock_version,
-            ));
-        } catch (\Throwable $exception) {
-            // Realtime wake-up is best effort; the committed financial decision remains authoritative.
-            report($exception);
-        }
+        SafeBroadcast::broadcastAfterCommit(new DataRefreshEvent(
+            (int) $submission->organization_id,
+            'payments',
+            'manual_payment_submission',
+            $submission->id,
+            $action,
+            (int) $submission->lock_version,
+            (int) $submission->submitted_by_user_id,
+            false,
+        ));
     }
 }

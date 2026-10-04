@@ -13,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['organization_id', 'name', 'email', 'status', 'phone', 'password', 'lock_version'])]
+#[Fillable(['organization_id', 'name', 'email', 'status', 'phone', 'password', 'lock_version', 'avatar_private_file_id'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -59,6 +59,11 @@ class User extends Authenticatable
     public function customerLinks(): HasMany
     {
         return $this->hasMany(CustomerUserLink::class);
+    }
+
+    public function avatarFile(): BelongsTo
+    {
+        return $this->belongsTo(PrivateFile::class, 'avatar_private_file_id');
     }
 
     public function customers(): BelongsToMany
@@ -139,6 +144,26 @@ class User extends Authenticatable
             ->where('customers.id', $customerId)
             ->wherePivot('is_active', true)
             ->exists();
+    }
+
+    /**
+     * Portal ownership for a posted invoice: direct customer_id, or a walk-in linked
+     * to one of this user's active customer accounts after an approved claim.
+     */
+    public function canAccessInvoice(Invoice $invoice): bool
+    {
+        if ($this->canAccessCustomer((int) $invoice->customer_id)) {
+            return true;
+        }
+
+        if (! $invoice->walk_in_customer_id) {
+            return false;
+        }
+
+        $portalCustomerId = WalkInCustomer::whereKey($invoice->walk_in_customer_id)
+            ->value('customer_id');
+
+        return $portalCustomerId !== null && $this->canAccessCustomer((int) $portalCustomerId);
     }
 
     public function canAccessLocation(int $locationId): bool

@@ -88,6 +88,7 @@ class InvoiceIssuanceArtifactTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'STEV_DOM', 'quantity' => 10],
                 ],
@@ -114,6 +115,13 @@ class InvoiceIssuanceArtifactTest extends TestCase
         $this->assertEquals('SERVICE', $snapshot->document_kind);
         $this->assertNotEmpty($snapshot->payload_snapshot);
         $this->assertEquals($invoiceNumber, $snapshot->payload_snapshot['invoice']['invoice_number']);
+        $this->assertSame('HONDURAS', $snapshot->payload_snapshot['shipment']['vessel_name']);
+        $this->assertSame('102', $snapshot->payload_snapshot['shipment']['voyage']);
+        $this->assertSame('IN', $snapshot->payload_snapshot['shipment']['movement']);
+        $this->assertSame('Domestic', $snapshot->payload_snapshot['shipment']['route']);
+        $this->assertSame('Test notes 102', $snapshot->payload_snapshot['shipment']['notes']);
+        $this->assertArrayHasKey('vat_amount', $snapshot->payload_snapshot['totals']);
+        $this->assertArrayNotHasKey('tax_treatment', $snapshot->payload_snapshot['shipment']);
 
         // 4. Verify DocumentArtifact was created
         $artifact = DocumentArtifact::where('snapshot_id', $snapshot->id)->first();
@@ -150,6 +158,7 @@ class InvoiceIssuanceArtifactTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 5],
                 ],
@@ -198,6 +207,8 @@ class InvoiceIssuanceArtifactTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                'surcharge_mode' => 'NONE',
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 20],
                 ],
@@ -223,6 +234,7 @@ class InvoiceIssuanceArtifactTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 10],
                 ],
@@ -267,6 +279,7 @@ class InvoiceIssuanceArtifactTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'STEV_DOM', 'quantity' => 10],
                 ],
@@ -329,6 +342,7 @@ class InvoiceIssuanceArtifactTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 10],
                 ],
@@ -374,6 +388,7 @@ class InvoiceIssuanceArtifactTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 10],
                 ],

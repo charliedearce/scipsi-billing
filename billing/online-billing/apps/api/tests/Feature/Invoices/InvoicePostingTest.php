@@ -84,6 +84,7 @@ class InvoicePostingTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 10],
                 ],
@@ -155,6 +156,7 @@ class InvoicePostingTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 5],
                 ],
@@ -201,9 +203,8 @@ class InvoicePostingTest extends TestCase
         $this->assertEquals('00000', $freshInvoice->buyer_snapshot['branch_code']);
     }
 
-    public function test_posting_fails_if_buyer_profile_is_not_fiscal_ready(): void
+    public function test_posting_allows_blank_optional_buyer_tin(): void
     {
-        // Setup customer without TIN
         $incompleteCustomer = Customer::create([
             'organization_id' => $this->org->id,
             'account_number' => 'ACC-NO-TIN',
@@ -223,7 +224,7 @@ class InvoicePostingTest extends TestCase
             'buyer_profile_id' => $profile->id,
             'version' => 1,
             'registered_name' => 'No TIN Logistics',
-            'tin' => null, // Missing TIN
+            'tin' => null,
             'branch_code' => '00000',
             'billing_address' => null,
             'effective_from' => Carbon::now()->subDay(),
@@ -233,6 +234,7 @@ class InvoicePostingTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $incompleteCustomer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 1],
                 ],
@@ -240,7 +242,58 @@ class InvoicePostingTest extends TestCase
 
         $invoiceId = $draftRes->json('data.id');
 
-        // Attempting to post must fail with 422
+        $postRes = $this->actingAs($this->admin, 'sanctum')
+            ->postJson("/api/v1/invoices/drafts/{$invoiceId}/post", [
+                'expected_version' => 1,
+            ]);
+
+        $postRes->assertStatus(200);
+        $invoice = Invoice::find($invoiceId);
+        $this->assertEquals('POSTED', $invoice->status);
+        $this->assertNotNull($invoice->invoice_number);
+        $this->assertNull($invoice->buyer_snapshot_tin);
+        $this->assertEquals('00000', $invoice->buyer_snapshot_branch_code);
+    }
+
+    public function test_posting_fails_if_buyer_registered_name_missing(): void
+    {
+        $incompleteCustomer = Customer::create([
+            'organization_id' => $this->org->id,
+            'account_number' => 'ACC-NO-NAME',
+            'name' => 'Nameless Buyer',
+            'status' => 'active',
+            'customer_type' => 'business',
+            'lock_version' => 1,
+        ]);
+
+        $profile = CustomerBuyerProfile::create([
+            'customer_id' => $incompleteCustomer->id,
+            'current_version' => 1,
+            'is_active' => true,
+        ]);
+
+        BuyerProfileVersion::create([
+            'buyer_profile_id' => $profile->id,
+            'version' => 1,
+            'registered_name' => '',
+            'tin' => null,
+            'branch_code' => '00000',
+            'billing_address' => null,
+            'effective_from' => Carbon::now()->subDay(),
+            'status' => 'active',
+        ]);
+
+        $draftRes = $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/invoices/drafts', [
+                'customer_id' => $incompleteCustomer->id,
+                ...$this->invoiceShipmentPayload(),
+                'items' => [
+                    ['tariff_code' => 'ARR_DOM', 'quantity' => 1],
+                ],
+            ]);
+
+        $invoiceId = $draftRes->json('data.id');
+
         $postRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson("/api/v1/invoices/drafts/{$invoiceId}/post", [
                 'expected_version' => 1,
@@ -259,6 +312,7 @@ class InvoicePostingTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 1],
                 ],
@@ -300,6 +354,7 @@ class InvoicePostingTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 1],
                 ],
@@ -323,6 +378,7 @@ class InvoicePostingTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 8],
                 ],
@@ -369,6 +425,7 @@ class InvoicePostingTest extends TestCase
         $draftRes = $this->actingAs($this->admin, 'sanctum')
             ->postJson('/api/v1/invoices/drafts', [
                 'customer_id' => $this->customer->id,
+                ...$this->invoiceShipmentPayload(),
                 'items' => [
                     ['tariff_code' => 'ARR_DOM', 'quantity' => 1],
                 ],

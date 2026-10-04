@@ -2,10 +2,12 @@
 
 namespace Tests\Feature\Realtime;
 
+use App\Events\ConversationReadEvent;
 use App\Events\NewChatMessageEvent;
 use App\Models\ChatMessage;
 use App\Models\Conversation;
 use App\Models\ConversationParticipant;
+use App\Models\InAppNotification;
 use App\Models\Organization;
 use App\Models\Role;
 use App\Models\User;
@@ -143,6 +145,11 @@ class ConversationChatTest extends TestCase
             'user_id' => $this->customerUser->id,
             'role' => 'customer',
         ]);
+        ConversationParticipant::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $this->tellerUser->id,
+            'role' => 'staff',
+        ]);
 
         // Teller views conversation messages
         $viewResponse = $this->actingAs($this->tellerUser, 'sanctum')
@@ -189,6 +196,11 @@ class ConversationChatTest extends TestCase
             'conversation_id' => $conversation->id,
             'user_id' => $this->customerUser->id,
             'role' => 'customer',
+        ]);
+        ConversationParticipant::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $this->tellerUser->id,
+            'role' => 'staff',
         ]);
 
         // Create 1 customer message and 1 staff note
@@ -248,6 +260,11 @@ class ConversationChatTest extends TestCase
             'user_id' => $this->customerUser->id,
             'role' => 'customer',
         ]);
+        ConversationParticipant::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $this->tellerUser->id,
+            'role' => 'staff',
+        ]);
 
         // Other customer tries to view: forbidden
         $otherCustResponse = $this->actingAs($this->otherCustomerUser, 'sanctum')
@@ -260,10 +277,30 @@ class ConversationChatTest extends TestCase
             ->getJson("/api/v1/conversations/{$conversation->id}");
 
         $ppaResponse->assertStatus(403);
+
+        // Administrator who is not a participant cannot browse or open the teller-customer thread.
+        $adminList = $this->actingAs($this->adminUser, 'sanctum')
+            ->getJson('/api/v1/conversations')
+            ->assertOk()
+            ->json('data');
+        $this->assertFalse(
+            collect($adminList)->contains(fn ($row) => (int) ($row['id'] ?? 0) === (int) $conversation->id),
+            'Administrator must not see conversations they are not a participant of.'
+        );
+
+        $this->actingAs($this->adminUser, 'sanctum')
+            ->getJson("/api/v1/conversations/{$conversation->id}")
+            ->assertStatus(403);
+
+        $this->actingAs($this->adminUser, 'sanctum')
+            ->getJson("/api/v1/conversations/{$conversation->id}/messages")
+            ->assertStatus(403);
     }
 
     public function test_read_receipt_and_unread_counts(): void
     {
+        Event::fake([ConversationReadEvent::class]);
+
         $conversation = Conversation::create([
             'organization_id' => $this->org->id,
             'customer_id' => $this->customerUser->id,
@@ -279,12 +316,39 @@ class ConversationChatTest extends TestCase
             'last_read_message_id' => null,
         ]);
 
+        ConversationParticipant::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $this->tellerUser->id,
+            'role' => 'staff',
+            'last_read_message_id' => null,
+        ]);
+
         // Staff posts message
         $msg = ChatMessage::create([
             'conversation_id' => $conversation->id,
             'sender_id' => $this->tellerUser->id,
             'message_type' => 'customer',
             'body' => 'Your invoice is ready.',
+        ]);
+
+        $relatedNotice = InAppNotification::create([
+            'organization_id' => $this->org->id,
+            'user_id' => $this->customerUser->id,
+            'type' => 'chat_message',
+            'title' => 'New message: Unread Tracking Test',
+            'body' => 'Your invoice is ready.',
+            'data' => ['conversation_id' => $conversation->id],
+            'is_read' => false,
+        ]);
+
+        $otherNotice = InAppNotification::create([
+            'organization_id' => $this->org->id,
+            'user_id' => $this->customerUser->id,
+            'type' => 'QUEUE',
+            'title' => 'Unrelated queue notice',
+            'body' => 'Should stay unread',
+            'data' => ['billing_request_id' => 99],
+            'is_read' => false,
         ]);
 
         // Customer lists conversations: unread_count should be 1
@@ -299,10 +363,32 @@ class ConversationChatTest extends TestCase
         $readResponse = $this->actingAs($this->customerUser, 'sanctum')
             ->postJson("/api/v1/conversations/{$conversation->id}/read");
 
-        $readResponse->assertStatus(200);
+        $readResponse->assertStatus(200)
+            ->assertJsonPath('data.last_read_message_id', $msg->id)
+            ->assertJsonPath('data.notifications_marked', 1);
+
+        $relatedNotice->refresh();
+        $otherNotice->refresh();
+        $this->assertTrue($relatedNotice->is_read);
+        $this->assertNotNull($relatedNotice->read_at);
+        $this->assertFalse($otherNotice->is_read);
+
+        Event::assertDispatched(ConversationReadEvent::class, function (ConversationReadEvent $event) use ($conversation, $msg) {
+            return (int) $event->participant->conversation_id === (int) $conversation->id
+                && (int) $event->participant->user_id === (int) $this->customerUser->id
+                && (int) $event->participant->last_read_message_id === (int) $msg->id
+                && $event->broadcastAs() === 'conversation.read';
+        });
 
         $participant->refresh();
         $this->assertEquals($msg->id, $participant->last_read_message_id);
+
+        // Teller sees peer cursor so UI can show Messenger-style "Seen"
+        $tellerMessages = $this->actingAs($this->tellerUser, 'sanctum')
+            ->getJson("/api/v1/conversations/{$conversation->id}/messages");
+
+        $tellerMessages->assertStatus(200)
+            ->assertJsonPath('meta.peer_last_read_message_id', $msg->id);
 
         // Customer lists conversations again: unread_count should be 0
         $listResponseAfter = $this->actingAs($this->customerUser, 'sanctum')

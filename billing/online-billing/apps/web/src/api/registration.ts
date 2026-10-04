@@ -42,7 +42,10 @@ export function registerCustomer(data: RegisterCustomerParams) {
 }
 
 export function resendRegistrationOtp(challengeId: number) {
-  return request.post<{ success: boolean; data: { challenge_id: number; expires_at: string; message: string } }>({
+  return request.post<{
+    success: boolean
+    data: { challenge_id: number; expires_at: string; message: string }
+  }>({
     url: '/api/v1/auth/contact-verifications/mobile/send',
     data: { challenge_id: challengeId }
   })
@@ -79,6 +82,14 @@ export function updatePortalProfile(data: {
   })
 }
 
+export interface AdminCustomerIdentityInput {
+  account_number: string
+  name: string
+  status?: string
+  customer_type?: string
+  is_vip?: boolean
+}
+
 export function fetchAdminCustomers(params?: {
   page?: number
   per_page?: number
@@ -95,6 +106,26 @@ export function fetchAdminCustomers(params?: {
 export function fetchAdminCustomerDetail(id: number) {
   return request.get<any>({
     url: `/api/v1/admin/customers/${id}`
+  })
+}
+
+export function createAdminCustomer(data: AdminCustomerIdentityInput) {
+  return request.post<{ success: boolean; message: string; customer: any }>({
+    url: '/api/v1/admin/customers',
+    data
+  })
+}
+
+export function fetchNextVipAccountNumber() {
+  return request.get<{ account_number: string }>({
+    url: '/api/v1/admin/customers/next-account-number'
+  })
+}
+
+export function updateAdminCustomer(id: number, data: AdminCustomerIdentityInput) {
+  return request.put<{ success: boolean; message: string; customer: any }>({
+    url: `/api/v1/admin/customers/${id}`,
+    data
   })
 }
 

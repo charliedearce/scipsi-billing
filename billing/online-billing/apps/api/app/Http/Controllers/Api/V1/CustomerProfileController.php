@@ -6,14 +6,24 @@ use App\Http\Controllers\Controller;
 use App\Models\BuyerProfileVersion;
 use App\Models\Customer;
 use App\Models\CustomerContactPoint;
+use App\Models\DocumentType;
+use App\Models\PrivateFile;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
+use App\Services\Uploads\PrivateStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 
 class CustomerProfileController extends Controller
 {
+    public function __construct(
+        protected PrivateStorageService $storageService,
+    ) {}
+
     /**
      * Get the authenticated user's portal profile, linked business accounts, and verified contact points.
      */
@@ -21,6 +31,7 @@ class CustomerProfileController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+        $user->loadMissing(['avatarFile.latestVersion']);
 
         $links = $user->customerLinks()
             ->with(['customer.buyerProfile.versions', 'customer.contactPoints'])
@@ -37,12 +48,17 @@ class CustomerProfileController extends Controller
                 'email' => $user->email,
                 'phone' => $user->phone,
                 'status' => $user->status,
+                'avatar' => $this->avatarPayload($user),
             ],
             'customer_links' => $links->map(function ($link) {
                 $customer = $link->customer;
                 $buyerProfile = $customer?->buyerProfile;
                 $currentVersion = $buyerProfile?->versions()
                     ->where('status', 'active')
+                    ->orderByDesc('version')
+                    ->first();
+                $pendingVersion = $buyerProfile?->versions()
+                    ->where('status', 'pending_review')
                     ->orderByDesc('version')
                     ->first();
 
@@ -57,19 +73,8 @@ class CustomerProfileController extends Controller
                     'buyer_profile' => $buyerProfile ? [
                         'id' => $buyerProfile->id,
                         'current_version' => $buyerProfile->current_version,
-                        'active_version' => $currentVersion ? [
-                            'version' => $currentVersion->version,
-                            'registered_name' => $currentVersion->registered_name,
-                            'trade_name' => $currentVersion->trade_name,
-                            'tin' => $currentVersion->tin,
-                            'tax_identification_number' => $currentVersion->tin,
-                            'branch_code' => $currentVersion->branch_code,
-                            'tax_classification' => $currentVersion->tax_classification,
-                            'billing_address' => $currentVersion->billing_address,
-                            'registered_address' => is_array($currentVersion->billing_address) ? json_encode($currentVersion->billing_address) : $currentVersion->billing_address,
-                            'status' => $currentVersion->status,
-                            'effective_from' => $currentVersion->effective_from?->toIso8601String(),
-                        ] : null,
+                        'active_version' => $currentVersion ? $this->buyerVersionPayload($currentVersion) : null,
+                        'pending_version' => $pendingVersion ? $this->buyerVersionPayload($pendingVersion) : null,
                     ] : null,
                 ];
             }),
@@ -122,6 +127,8 @@ class CustomerProfileController extends Controller
                 );
             }
 
+            $buyerVersion = null;
+
             // If buyer profile fields provided, create a new version (immutable versioning)
             if (! empty($validated['customer_id']) && ! empty($validated['registered_name'])) {
                 // Verify user has link to this customer
@@ -148,21 +155,21 @@ class CustomerProfileController extends Controller
                     $rawAddress = $validated['billing_address'] ?? $validated['registered_address'] ?? null;
                     $address = is_string($rawAddress) ? ['line1' => $rawAddress] : $rawAddress;
 
-                    $newVersion = BuyerProfileVersion::create([
+                    $buyerVersion = BuyerProfileVersion::create([
                         'buyer_profile_id' => $buyerProfile->id,
                         'version' => $nextVersionNumber,
                         'registered_name' => $validated['registered_name'],
                         'tin' => $tin,
                         'branch_code' => $validated['branch_code'] ?? '00000',
                         'billing_address' => $address,
-                        'status' => 'pending_review', // Requires review if modifying tax/legal entity
+                        'status' => 'pending_review',
                         'effective_from' => now(),
                         'created_by_user_id' => $user->id,
                     ]);
 
                     AuditLogger::log(
                         action: 'buyer_profile.version_created',
-                        auditable: $newVersion,
+                        auditable: $buyerVersion,
                         oldValues: null,
                         newValues: [
                             'version' => $nextVersionNumber,
@@ -177,13 +184,182 @@ class CustomerProfileController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Profile updated successfully.',
+                'message' => $buyerVersion
+                    ? 'Profile updated. Company/buyer changes are pending review and only affect future documents.'
+                    : 'Profile updated successfully.',
                 'user' => [
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
+                    'avatar' => $this->avatarPayload($user->fresh(['avatarFile.latestVersion'])),
                 ],
+                'buyer_version' => $buyerVersion ? $this->buyerVersionPayload($buyerVersion) : null,
             ]);
         });
+    }
+
+    /**
+     * Change the authenticated user's password.
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'string', 'confirmed', Password::min(10)->letters()->numbers()],
+        ]);
+
+        if (! Hash::check($validated['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['The current password is incorrect.'],
+            ]);
+        }
+
+        $user->update([
+            'password' => $validated['password'],
+        ]);
+
+        AuditLogger::log(
+            action: 'user.password_change',
+            auditable: $user,
+            oldValues: null,
+            newValues: ['changed' => true],
+            actor: $user,
+            organizationId: $user->organization_id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Password changed successfully.',
+        ]);
+    }
+
+    /**
+     * Upload or replace the portal profile picture (private file).
+     */
+    public function uploadAvatar(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $request->validate([
+            'file' => ['required', 'file', 'mimes:jpeg,jpg,png,webp', 'max:2048'],
+        ]);
+
+        $docType = DocumentType::firstOrCreate(
+            [
+                'organization_id' => $user->organization_id,
+                'code' => 'PROFILE_AVATAR',
+            ],
+            [
+                'name' => 'Portal Profile Picture',
+                'description' => 'Optional customer portal profile photograph (JPEG/PNG/WebP).',
+                'purpose' => 'PROFILE_AVATAR',
+                'allowed_mime_types' => ['image/jpeg', 'image/png', 'image/webp'],
+                'max_file_size_kb' => 2048,
+                'max_files' => 1,
+                'is_active' => true,
+            ]
+        );
+
+        $previousFileId = $user->avatar_private_file_id;
+
+        return DB::transaction(function () use ($request, $user, $docType, $previousFileId) {
+            if ($previousFileId) {
+                $existing = PrivateFile::where('organization_id', $user->organization_id)
+                    ->where('id', $previousFileId)
+                    ->first();
+
+                if ($existing) {
+                    $this->storageService->replaceFile(
+                        $existing,
+                        $request->file('file'),
+                        $user,
+                        'Portal profile picture update'
+                    );
+                    $file = $existing->fresh(['latestVersion']);
+                } else {
+                    $file = $this->storageService->storeFile(
+                        $request->file('file'),
+                        $docType,
+                        $user,
+                        $user
+                    );
+                    $user->update(['avatar_private_file_id' => $file->id]);
+                }
+            } else {
+                $file = $this->storageService->storeFile(
+                    $request->file('file'),
+                    $docType,
+                    $user,
+                    $user
+                );
+                $user->update(['avatar_private_file_id' => $file->id]);
+            }
+
+            AuditLogger::log(
+                action: 'user.avatar_update',
+                auditable: $user,
+                oldValues: ['avatar_private_file_id' => $previousFileId],
+                newValues: ['avatar_private_file_id' => $user->avatar_private_file_id],
+                actor: $user,
+                organizationId: $user->organization_id
+            );
+
+            $user->load(['avatarFile.latestVersion']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profile picture updated.',
+                'avatar' => $this->avatarPayload($user),
+                'data' => $file,
+            ], 201);
+        });
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function avatarPayload(User $user): ?array
+    {
+        $file = $user->avatarFile;
+        if (! $file) {
+            return null;
+        }
+
+        $version = $file->latestVersion;
+
+        return [
+            'private_file_id' => $file->id,
+            'download_path' => '/api/v1/files/'.$file->id.'/download',
+            'mime_type' => $version?->mime_type,
+            'original_name' => $version?->original_name,
+            'status' => $file->status,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buyerVersionPayload(BuyerProfileVersion $version): array
+    {
+        return [
+            'id' => $version->id,
+            'version' => $version->version,
+            'registered_name' => $version->registered_name,
+            'trade_name' => $version->trade_name,
+            'tin' => $version->tin,
+            'tax_identification_number' => $version->tin,
+            'branch_code' => $version->branch_code,
+            'tax_classification' => $version->tax_classification,
+            'billing_address' => $version->billing_address,
+            'registered_address' => is_array($version->billing_address)
+                ? ($version->billing_address['line1'] ?? json_encode($version->billing_address))
+                : $version->billing_address,
+            'status' => $version->status,
+            'effective_from' => $version->effective_from?->toIso8601String(),
+        ];
     }
 }

@@ -161,11 +161,13 @@ class PrivateStorageService
             abort(403, 'Unauthorized access across organization boundary.');
         }
 
-        // 2. Ownership / Review permission guard
+        // 2. Ownership / staff review / billing-request reference guard
         $isOwner = ($file->owner_id === $requestingUser->id) || ($file->uploaded_by === $requestingUser->id);
         $canReview = $requestingUser->hasPermission('files:review');
+        $canViewBillingAttachment = $requestingUser->hasPermission('billing:read')
+            && $this->isLinkedToAuthorizedBillingRequest($file, $requestingUser);
 
-        if (! $isOwner && ! $canReview) {
+        if (! $isOwner && ! $canReview && ! $canViewBillingAttachment) {
             abort(403, 'You do not have permission to view or download this private file.');
         }
 
@@ -181,13 +183,13 @@ class PrivateStorageService
         }
 
         // 4. Quarantine guard: non-admin/reviewer cannot download quarantined file
-        if ($version->scan_status === 'QUARANTINED') {
+        if ($version->scan_status === 'QUARANTINED' && ! $canReview && ! $requestingUser->hasPermission('files:quarantine')) {
             abort(422, 'This file version has been quarantined for security violations and cannot be downloaded.');
         }
 
         $disk = Storage::disk($version->disk);
         if (! $disk->exists($version->file_path)) {
-            abort(404, 'File payload not found on private storage.');
+            abort(404, 'Uploaded file is missing from private storage. Re-upload the document (API rebuilds previously wiped local files).');
         }
 
         return $disk->download(
@@ -199,6 +201,18 @@ class PrivateStorageService
                 'X-Content-Type-Options' => 'nosniff',
             ]
         );
+    }
+
+    /**
+     * Tellers with billing:read may download files attached to a billing request in their organization.
+     */
+    protected function isLinkedToAuthorizedBillingRequest(PrivateFile $file, User $requestingUser): bool
+    {
+        return DB::table('billing_request_documents')
+            ->join('billing_requests', 'billing_requests.id', '=', 'billing_request_documents.billing_request_id')
+            ->where('billing_request_documents.private_file_id', $file->id)
+            ->where('billing_requests.organization_id', $requestingUser->organization_id)
+            ->exists();
     }
 
     /**

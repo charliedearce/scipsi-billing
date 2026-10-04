@@ -85,7 +85,59 @@ class BillClaimController extends Controller
         );
 
         return response()->json([
-            'message' => 'Verification successful. Invoice linked to your account.',
+            'message' => 'Verification successful. Review the invoice details and accept to add it to My Bills.',
+            'claim' => $claim->makeHidden(['code_hash', 'code_salt']),
+        ]);
+    }
+
+    /**
+     * Safe invoice preview after identity verification.
+     * GET /api/v1/portal/bill-claims/{id}/preview
+     */
+    public function preview(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $claim = BillClaimRequest::where('user_id', $user->id)->findOrFail($id);
+
+        return response()->json([
+            'data' => $this->service->previewClaim($user, $claim),
+        ]);
+    }
+
+    /**
+     * Customer accepts the previewed invoice into My Bills.
+     * POST /api/v1/portal/bill-claims/{id}/accept
+     */
+    public function accept(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $claim = BillClaimRequest::where('user_id', $user->id)->findOrFail($id);
+
+        $claim = $this->service->acceptClaim($user, $claim);
+
+        return response()->json([
+            'message' => 'Invoice accepted and added to My Bills.',
+            'claim' => $claim->makeHidden(['code_hash', 'code_salt']),
+        ]);
+    }
+
+    /**
+     * Customer declines the previewed invoice (no ownership link).
+     * POST /api/v1/portal/bill-claims/{id}/decline
+     */
+    public function decline(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'reason' => 'nullable|string|max:1000',
+        ]);
+
+        $user = $request->user();
+        $claim = BillClaimRequest::where('user_id', $user->id)->findOrFail($id);
+
+        $claim = $this->service->declineClaim($user, $claim, $validated['reason'] ?? null);
+
+        return response()->json([
+            'message' => 'Claim declined. Invoice was not added to My Bills.',
             'claim' => $claim->makeHidden(['code_hash', 'code_salt']),
         ]);
     }

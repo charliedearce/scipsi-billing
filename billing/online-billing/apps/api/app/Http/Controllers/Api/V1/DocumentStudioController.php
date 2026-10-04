@@ -8,6 +8,7 @@ use App\Models\DocumentTemplate;
 use App\Models\DocumentTemplateActivation;
 use App\Models\DocumentTemplateVersion;
 use App\Models\Location;
+use App\Services\DocumentStudio\DocumentLayoutSchema;
 use App\Services\DocumentStudio\DocumentRendererService;
 use App\Services\DocumentStudio\DocumentStudioService;
 use Illuminate\Http\JsonResponse;
@@ -44,7 +45,7 @@ class DocumentStudioController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'document_kind' => 'required|string|in:SERVICE,SERVICE_NSCL,PPA,COLLECTION_RECEIPT,ACCOUNT_STATEMENT,YELLOW_INVOICE,WHITE_RECEIPT',
+            'document_kind' => 'required|string|in:SERVICE,SERVICE_NSCL,PPA,COLLECTION_RECEIPT,ACKNOWLEDGEMENT_RECEIPT,ACCOUNT_STATEMENT,YELLOW_INVOICE,WHITE_RECEIPT',
             'code' => 'required|string|max:64',
             'name' => 'required|string|max:128',
             'description' => 'nullable|string|max:500',
@@ -58,6 +59,7 @@ class DocumentStudioController extends Controller
             'ACCOUNT_STATEMENT' => $this->studioService->getDefaultAccountStatementLayout(),
             'YELLOW_INVOICE', 'WHITE_RECEIPT' => $this->studioService->getDefaultTransmittalLayout($validated['document_kind']),
             'COLLECTION_RECEIPT' => $this->studioService->getDefaultCollectionReceiptLayout(),
+            'ACKNOWLEDGEMENT_RECEIPT' => $this->studioService->getDefaultAcknowledgementReceiptLayout(),
             default => $this->studioService->getDefaultSalesInvoiceLayout(),
         };
         $template = DB::transaction(function () use ($org, $validated, $user, $initialLayout): DocumentTemplate {
@@ -173,8 +175,19 @@ class DocumentStudioController extends Controller
         $template = DocumentTemplate::where('organization_id', $orgId)->findOrFail($id);
         $version = $template->versions()->findOrFail($versionId);
 
+        $layout = $version->layout_definition;
+        if (
+            is_array($request->input('layout_definition'))
+            && in_array($version->status, ['DRAFT', 'VALIDATED'], true)
+        ) {
+            $candidate = $request->validate([
+                'layout_definition' => ['required', 'array'],
+            ])['layout_definition'];
+            $layout = app(DocumentLayoutSchema::class)->validateStructure($candidate);
+        }
+
         $sampleData = $request->input('sample_data') ?? $this->rendererService->createSampleData($template->document_kind);
-        $pdfBinary = $this->rendererService->renderToPdf($version->layout_definition, $sampleData, $template->organization_id);
+        $pdfBinary = $this->rendererService->renderToPdf($layout, $sampleData, $template->organization_id);
 
         if ($request->query('format') === 'base64') {
             return response()->json([

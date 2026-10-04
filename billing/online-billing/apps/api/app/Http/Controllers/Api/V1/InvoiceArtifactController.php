@@ -45,6 +45,12 @@ class InvoiceArtifactController extends Controller
 
         /** @var DocumentArtifact|null $artifact */
         $artifact = $invoice->canonicalArtifact;
+        if ($artifact && ($artifact->status !== 'RENDERED' || ! $artifact->existsOnDisk())) {
+            $artifact = $this->artifactService->retryFailedArtifact($artifact, $request->user());
+            $invoice->unsetRelation('canonicalArtifact');
+            $artifact = $invoice->fresh(['canonicalArtifact'])->canonicalArtifact;
+        }
+
         if (! $artifact || $artifact->status !== 'RENDERED' || ! $artifact->existsOnDisk()) {
             throw new NotFoundHttpException('No valid canonical PDF artifact found for this invoice.');
         }
@@ -129,7 +135,7 @@ class InvoiceArtifactController extends Controller
 
         // If user is a customer without staff read permissions, ensure customer owns this invoice
         if (! $user->hasAnyPermission(['billing:read', 'templates:read', 'documents:artifacts:view'])) {
-            if (! $user->canAccessCustomer($invoice->customer_id)) {
+            if (! $user->canAccessInvoice($invoice)) {
                 abort(403, 'Unauthorized access to invoice artifact.');
             }
         }

@@ -14,6 +14,7 @@ use App\Models\PaymentGroupItem;
 use App\Models\PaymentPolicyVersion;
 use App\Models\ReceiptAllocation;
 use App\Models\User;
+use App\Models\WalkInCustomer;
 use App\Services\Sms\NotificationEventRecorder;
 use App\Services\Sms\SmsDeliveryOrchestrator;
 use Carbon\Carbon;
@@ -422,10 +423,10 @@ class PaymentPolicyService
     /** @param array{expected_invoice_lock_version:int,requested_amount:string} $input */
     protected function assertInvoiceSelectable(Invoice $invoice, Customer $customer, array $input, string $currency): void
     {
-        if ($invoice->customer_id !== $customer->id || $invoice->status !== 'POSTED') {
+        if ($invoice->status !== 'POSTED' || ! $this->customerOwnsPostedInvoice($customer, $invoice)) {
             throw ValidationException::withMessages(['allocations' => ['Only posted bills belonging to the selected customer can be paid.']]);
         }
-        if (strtoupper($invoice->currency) !== strtoupper($currency)) {
+        if (strtoupper((string) $invoice->currency) !== strtoupper($currency)) {
             throw ValidationException::withMessages(['allocations' => ['Selected bills must use the policy currency.']]);
         }
         if ($invoice->lock_version !== $input['expected_invoice_lock_version']) {
@@ -438,6 +439,25 @@ class PaymentPolicyService
         if (bccomp($input['requested_amount'], $outstanding, 2) !== 0) {
             throw ValidationException::withMessages(['allocations' => ['Regular customer payment instructions must select each bill at its full current balance.']]);
         }
+    }
+
+    /**
+     * Portal ownership for payment: direct customer_id, or walk-in claim link
+     * (invoice.customer_id may remain the shell FK after approval).
+     */
+    protected function customerOwnsPostedInvoice(Customer $customer, Invoice $invoice): bool
+    {
+        if ((int) $invoice->customer_id === (int) $customer->id) {
+            return true;
+        }
+
+        if (! $invoice->walk_in_customer_id) {
+            return false;
+        }
+
+        return WalkInCustomer::whereKey($invoice->walk_in_customer_id)
+            ->where('customer_id', $customer->id)
+            ->exists();
     }
 
     protected function outstandingAmount(int $invoiceId, string $totalCharge): string

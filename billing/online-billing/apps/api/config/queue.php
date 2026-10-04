@@ -31,6 +31,15 @@ return [
 
     'connections' => [
 
+        'legacy_import' => [
+            'driver' => 'database',
+            'connection' => null,
+            'table' => 'jobs',
+            'queue' => 'legacy-imports',
+            'retry_after' => 1900,
+            'after_commit' => false,
+        ],
+
         'sync' => [
             'driver' => 'sync',
         ],

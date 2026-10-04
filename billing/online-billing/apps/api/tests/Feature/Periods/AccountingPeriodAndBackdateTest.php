@@ -106,7 +106,7 @@ class AccountingPeriodAndBackdateTest extends TestCase
 
     private function draft(string $businessDate): int
     {
-        return $this->actingAs($this->teller, 'sanctum')->postJson('/api/v1/invoices/drafts', ['customer_id' => $this->customer->id, 'business_date' => $businessDate, 'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]]])->assertCreated()->json('data.id');
+        return $this->actingAs($this->teller, 'sanctum')->postJson('/api/v1/invoices/drafts', ['customer_id' => $this->customer->id, 'business_date' => $businessDate, ...$this->invoiceShipmentPayload(), 'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]]])->assertCreated()->json('data.id');
     }
 
     private function receiptPayload(Invoice $invoice, string $businessDate): array

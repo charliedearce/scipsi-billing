@@ -1,63 +1,85 @@
 <template>
-  <div class="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
-    <section
-      class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-      ><div
-        ><h1 class="text-xl font-bold">VIP Repayment Review</h1
-        ><p class="mt-1 text-sm text-slate-500"
-          >Claim the oldest proof, verify actual funds and post only the explicit confirmed
-          allocations.</p
-        ></div
-      ><div class="flex gap-2"
-        ><ElButton :loading="loading" @click="load">Refresh</ElButton
-        ><ElButton type="primary" :loading="claiming" @click="claim">Claim oldest</ElButton></div
-      ></section
-    >
-    <ElTable v-loading="loading" :data="submissions"
-      ><ElTableColumn prop="id" label="Submission" width="110"
-        ><template #default="{ row }">#{{ row.id }}</template></ElTableColumn
-      ><ElTableColumn label="Customer" min-width="180"
-        ><template #default="{ row }">{{
-          row.customer?.name || `Customer #${row.customer_id}`
-        }}</template></ElTableColumn
-      ><ElTableColumn label="Allocations" min-width="260"
-        ><template #default="{ row }"
-          ><div v-for="item in row.allocations" :key="item.invoice_id" class="text-xs"
-            >{{ item.invoice?.invoice_number || `#${item.invoice_id}` }} —
-            {{ money(item.requested_amount, row.currency) }}</div
-          ></template
-        ></ElTableColumn
-      ><ElTableColumn
-        prop="declared_reference"
-        label="Customer reference"
-        min-width="160"
-      /><ElTableColumn prop="status" label="Status" min-width="120" /><ElTableColumn
-        label="Actions"
-        width="220"
-        fixed="right"
-        ><template #default="{ row }"
-          ><ElButton
-            v-if="row.status === 'IN_REVIEW'"
-            size="small"
-            type="success"
-            @click="approve(row)"
-            >Approve</ElButton
-          ><ElButton
-            v-if="row.status === 'IN_REVIEW'"
-            size="small"
-            type="danger"
-            plain
-            @click="reject(row)"
-            >Reject</ElButton
-          ></template
-        ></ElTableColumn
-      ></ElTable
-    >
+  <div class="page-content space-y-5">
+    <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div class="flex items-start gap-3.5">
+        <div class="size-11 flex-cc shrink-0 rounded-lg bg-theme/10 text-theme">
+          <ArtSvgIcon icon="ri:shield-check-line" class="text-2xl" />
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-xl font-medium text-g-900">VIP Repayment Review</h1>
+          <p class="mt-1 max-w-2xl text-sm text-g-500">
+            Claim the oldest proof, verify actual funds and post only the explicit confirmed
+            allocations.
+          </p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <ElButton :loading="loading" @click="load">
+          <ArtSvgIcon icon="ri:refresh-line" class="mr-1" />
+          Refresh
+        </ElButton>
+        <ElButton type="primary" :loading="claiming" @click="claim">Claim oldest</ElButton>
+      </div>
+    </header>
+    <section class="art-card p-5">
+      <div class="art-card-header">
+        <div class="title">
+          <h4>Waiting bank-transfer proofs</h4>
+          <p>A proof is not a receipt until the confirmed allocations are posted</p>
+        </div>
+      </div>
+      <ElEmpty
+        v-if="!loading && submissions.length === 0"
+        description="No VIP repayment proof is waiting for review."
+      />
+      <ElTable v-else v-loading="loading" :data="submissions"
+        ><ElTableColumn prop="id" label="Submission" width="110"
+          ><template #default="{ row }">#{{ row.id }}</template></ElTableColumn
+        ><ElTableColumn label="Customer" min-width="180"
+          ><template #default="{ row }">{{
+            row.customer?.name || `Customer #${row.customer_id}`
+          }}</template></ElTableColumn
+        ><ElTableColumn label="Allocations" min-width="260"
+          ><template #default="{ row }"
+            ><div v-for="item in row.allocations" :key="item.invoice_id" class="text-xs"
+              >{{ item.invoice?.invoice_number || `#${item.invoice_id}` }} —
+              {{ money(item.requested_amount, row.currency) }}</div
+            ></template
+          ></ElTableColumn
+        ><ElTableColumn
+          prop="declared_reference"
+          label="Customer reference"
+          min-width="160"
+        /><ElTableColumn prop="status" label="Status" min-width="120" /><ElTableColumn
+          label="Actions"
+          width="220"
+          fixed="right"
+          ><template #default="{ row }"
+            ><ElButton
+              v-if="row.status === 'IN_REVIEW'"
+              size="small"
+              type="success"
+              @click="approve(row)"
+              >Approve</ElButton
+            ><ElButton
+              v-if="row.status === 'IN_REVIEW'"
+              size="small"
+              type="danger"
+              plain
+              @click="reject(row)"
+              >Reject</ElButton
+            ></template
+          ></ElTableColumn
+        ></ElTable
+      >
+    </section>
   </div>
 </template>
 <script setup lang="ts">
   import { onMounted, ref } from 'vue'
   import { ElMessage, ElMessageBox } from 'element-plus'
+  import { fetchGetUserInfo } from '@/api/auth'
+  import { useAuthoritativeRealtimeRefresh } from '@/composables/useAuthoritativeRealtimeRefresh'
   import {
     approveVipCreditRepayment,
     claimNextVipCreditRepayment,
@@ -69,6 +91,11 @@
   const loading = ref(false)
   const claiming = ref(false)
   const submissions = ref<VipCreditRepayment[]>([])
+  const realtime = useAuthoritativeRealtimeRefresh({
+    scope: 'vip_credit',
+    refresh: () => load(),
+    isBusy: () => claiming.value
+  })
   const money = (value: string, currency = 'PHP') =>
     new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(Number(value))
   async function load() {
@@ -132,5 +159,11 @@
         ElMessage.error(error?.message || 'Unable to reject this repayment.')
     }
   }
-  onMounted(load)
+  onMounted(async () => {
+    const me = await fetchGetUserInfo()
+    realtime.startForOrganization(
+      Number((me as any).organization?.id || (me as any).organization_id)
+    )
+    await load()
+  })
 </script>

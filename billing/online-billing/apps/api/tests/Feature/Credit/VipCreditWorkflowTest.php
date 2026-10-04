@@ -21,6 +21,7 @@ use App\Models\ReceiptAllocation;
 use App\Models\Role;
 use App\Models\User;
 use App\Models\VipCreditRepaymentSubmission;
+use Carbon\Carbon;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -53,6 +54,99 @@ class VipCreditWorkflowTest extends TestCase
         $this->teller = $this->userWithRole('VIP Teller', 'vip.teller@example.test', 'Teller');
         $this->publishedCreditPolicy();
         $this->configureCreditAccount();
+    }
+
+    public function test_administrator_can_delete_credit_policy_draft_but_not_published_version(): void
+    {
+        $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/credit-policies', [
+            'currency' => 'PHP',
+            'default_credit_limit_mode' => 'CAPPED',
+            'default_credit_limit_amount' => '50000.00',
+            'payment_terms_days' => 15,
+            'due_date_basis' => 'CREDIT_CHARGE_DATE',
+            'overdue_restriction' => 'WARN',
+            'overdue_grace_days' => 0,
+            'allow_customer_overrides' => true,
+            'effective_from' => now('Asia/Manila')->toIso8601String(),
+        ])->assertCreated()->json('data');
+
+        $this->actingAs($this->admin, 'sanctum')->deleteJson('/api/v1/admin/credit-policies/'.$draft['id'], [
+            'expected_lock_version' => $draft['lock_version'],
+        ])->assertOk();
+        $this->assertDatabaseMissing('credit_policy_versions', ['id' => $draft['id']]);
+
+        $published = CreditPolicyVersion::where('organization_id', $this->admin->organization_id)
+            ->where('status', CreditPolicyVersion::STATUS_PUBLISHED)
+            ->firstOrFail();
+        $this->actingAs($this->admin, 'sanctum')->deleteJson('/api/v1/admin/credit-policies/'.$published->id, [
+            'expected_lock_version' => $published->lock_version,
+        ])->assertStatus(422)->assertJsonValidationErrors('policy');
+        $this->assertDatabaseHas('credit_policy_versions', ['id' => $published->id]);
+    }
+
+    public function test_publishing_a_later_credit_policy_closes_the_open_ended_prior_version(): void
+    {
+        $prior = CreditPolicyVersion::where('organization_id', $this->admin->organization_id)
+            ->where('status', CreditPolicyVersion::STATUS_PUBLISHED)
+            ->where('version_number', 1)
+            ->firstOrFail();
+        $this->assertNull($prior->effective_to);
+
+        $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/credit-policies', [
+            'currency' => 'PHP',
+            'default_credit_limit_mode' => 'CAPPED',
+            'default_credit_limit_amount' => '200000.00',
+            'payment_terms_days' => 45,
+            'due_date_basis' => 'CREDIT_CHARGE_DATE',
+            'overdue_restriction' => 'BLOCK',
+            'overdue_grace_days' => 0,
+            'allow_customer_overrides' => true,
+            'effective_from' => now('Asia/Manila')->addMinute()->toIso8601String(),
+        ])->assertCreated()->json('data');
+
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/credit-policies/'.$draft['id'].'/publish', [
+            'expected_lock_version' => $draft['lock_version'],
+            'reason' => 'Supersede open-ended version 1 for later terms.',
+        ])->assertOk()->assertJsonPath('data.status', 'PUBLISHED');
+
+        $prior->refresh();
+        $published = CreditPolicyVersion::findOrFail($draft['id']);
+        $this->assertNotNull($prior->effective_to);
+        $this->assertTrue($prior->effective_to->equalTo($published->effective_from));
+    }
+
+    public function test_publishing_a_draft_with_earlier_effective_from_advances_and_closes_open_prior(): void
+    {
+        $prior = CreditPolicyVersion::where('organization_id', $this->admin->organization_id)
+            ->where('status', CreditPolicyVersion::STATUS_PUBLISHED)
+            ->where('version_number', 1)
+            ->firstOrFail();
+
+        // Reproduce Admin UI drafts that land before the current published start.
+        $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/credit-policies', [
+            'currency' => 'PHP',
+            'default_credit_limit_mode' => 'CAPPED',
+            'default_credit_limit_amount' => '150000.00',
+            'payment_terms_days' => 30,
+            'due_date_basis' => 'CREDIT_CHARGE_DATE',
+            'overdue_restriction' => 'BLOCK',
+            'overdue_grace_days' => 0,
+            'allow_customer_overrides' => true,
+            'effective_from' => $prior->effective_from->copy()->subDay()->toIso8601String(),
+        ])->assertCreated()->json('data');
+
+        $published = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/credit-policies/'.$draft['id'].'/publish', [
+            'expected_lock_version' => $draft['lock_version'],
+            'reason' => 'Publish despite draft Effective from being earlier than version 1.',
+        ])->assertOk()->json('data');
+
+        $prior->refresh();
+        $this->assertSame('PUBLISHED', $published['status']);
+        $this->assertNotNull($prior->effective_to);
+        $this->assertTrue(
+            Carbon::parse($published['effective_from'])->greaterThan($prior->effective_from)
+        );
+        $this->assertTrue($prior->effective_to->equalTo(Carbon::parse($published['effective_from'])));
     }
 
     public function test_vip_charge_is_all_or_nothing_captures_terms_and_never_creates_a_receipt_or_second_charge(): void
@@ -139,6 +233,41 @@ class VipCreditWorkflowTest extends TestCase
             'allocations' => [['invoice_id' => $second->id, 'cash_amount' => '100.00']],
         ])->assertStatus(422)->assertJsonValidationErrors('confirmed_reference');
         $this->assertDatabaseCount('receipts', 1);
+    }
+
+    public function test_vip_repayment_submission_times_keep_the_actual_utc_instant(): void
+    {
+        $invoice = $this->postedInvoice();
+        $this->charge($invoice);
+
+        Carbon::setTestNow('2026-10-04 01:23:45 UTC');
+        try {
+            $submission = $this->submitRepayment($invoice, $this->paymentProof('timestamp-first'), '100.00');
+            $this->assertTrue($submission->initial_submitted_at->equalTo(Carbon::now('UTC')));
+            $this->assertTrue($submission->submitted_at->equalTo(Carbon::now('UTC')));
+            $portalRow = $this->actingAs($this->customerUser, 'sanctum')
+                ->getJson('/api/v1/portal/credit-repayments?customer_id='.$this->customer->id)
+                ->assertOk()->json('data.0');
+            $this->assertTrue(Carbon::parse($portalRow['initial_submitted_at'])->equalTo(Carbon::now('UTC')));
+
+            $claimed = $this->actingAs($this->teller, 'sanctum')
+                ->postJson('/api/v1/teller/credit-repayments/claim-next')->assertOk()->json('data');
+            $this->assertTrue(Carbon::parse($claimed['assigned_at'])->equalTo(Carbon::now('UTC')));
+            $this->actingAs($this->teller, 'sanctum')
+                ->postJson('/api/v1/teller/credit-repayments/'.$submission->id.'/reject', [
+                    'expected_version' => $claimed['lock_version'], 'reason' => 'Please upload a clearer proof.',
+                ])->assertOk()->assertJsonPath('data.reviewed_at', Carbon::now('UTC')->toJSON());
+
+            Carbon::setTestNow('2026-10-04 02:23:45 UTC');
+            $resubmitted = $this->actingAs($this->customerUser, 'sanctum')
+                ->postJson('/api/v1/portal/credit-repayments/'.$submission->id.'/resubmit', [
+                    'proof_file_id' => $this->paymentProof('timestamp-retry')->id,
+                ])->assertOk()->json('data');
+            $this->assertTrue(Carbon::parse($resubmitted['initial_submitted_at'])->equalTo(Carbon::parse('2026-10-04 01:23:45 UTC')));
+            $this->assertTrue(Carbon::parse($resubmitted['submitted_at'])->equalTo(Carbon::now('UTC')));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_held_vip_account_blocks_new_charges_but_keeps_existing_credit_repayable_and_rejection_keeps_debt(): void
@@ -369,6 +498,7 @@ class VipCreditWorkflowTest extends TestCase
         $customer ??= $this->customer;
         $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', [
             'customer_id' => $customer->id, 'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]],
+            ...$this->invoiceShipmentPayload(),
         ])->assertCreated();
         $id = $draft->json('data.id');
         $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts/'.$id.'/post', ['expected_version' => 1])->assertOk();

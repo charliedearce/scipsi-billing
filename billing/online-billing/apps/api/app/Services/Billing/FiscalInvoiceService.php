@@ -36,7 +36,11 @@ class FiscalInvoiceService
         $buyerValidation = $this->buyerProfileValidator->validateForBilling($invoice->customer);
         if (! $buyerValidation['is_fiscal_ready']) {
             foreach ($buyerValidation['missing_fiscal_fields'] as $missing) {
-                $errors[] = "Buyer profile is missing required BIR field: [{$missing}].";
+                if ($missing === 'tin') {
+                    $errors[] = 'Buyer TIN was provided but is incomplete. Leave TIN blank or enter at least 9 digits.';
+                } else {
+                    $errors[] = "Buyer profile is missing required BIR field: [{$missing}].";
+                }
             }
         }
 
@@ -48,21 +52,48 @@ class FiscalInvoiceService
             $errors[] = 'Active Taxpayer Profile is missing mandatory TIN or registered corporate name.';
         }
 
-        // 3. Validate Tax Exemption Evidence for Non-VAT or Zero-Rated Sales (Decision W20 / P2-08)
-        $hasExemptOrZeroRated = $invoice->items()->whereHas('pricingSnapshot', function ($q) {
-            $q->whereIn('tax_treatment_key', ['ZERO_RATED', 'EXEMPT', 'NON_VAT']);
-        })->exists();
-
+        // 3. Customer tax-exemption evidence (Decision W20 / P2-08):
+        // Require an approved customer exemption only when a line is ZERO_RATED/EXEMPT/NON_VAT
+        // because of a customer exemption override of an otherwise VATABLE tariff.
+        // Tariff-native ZERO_RATED/EXEMPT/NON_VAT (e.g. foreign-route ARR_FOR) is a W29 tariff
+        // classification and must not demand a PEZA/BOI-style customer exemption record.
         $taxService = $this->taxEvidenceService ?? app(TaxEvidenceService::class);
-        if ($hasExemptOrZeroRated && $taxService) {
-            $effectiveExemption = $taxService->findEffectiveExemption(
-                $invoice->customer_id,
-                $invoice->business_date,
-                'ALL'
-            );
+        $invoice->loadMissing(['items.pricingSnapshot', 'items.tariffVersion.tariff']);
 
-            if (! $effectiveExemption) {
-                $errors[] = "Invoice contains non-VAT or zero-rated items, but customer has no approved tax exemption covering business date [{$invoice->business_date}].";
+        $exemptionDrivenLines = $invoice->items->filter(function ($item) {
+            $applied = $item->pricingSnapshot?->tax_treatment_key;
+            if (! in_array($applied, ['ZERO_RATED', 'EXEMPT', 'NON_VAT'], true)) {
+                return false;
+            }
+
+            $native = $item->tariffVersion?->tax_treatment_key ?? 'VATABLE';
+
+            return $native === 'VATABLE';
+        });
+
+        if ($exemptionDrivenLines->isNotEmpty() && $taxService) {
+            $businessDate = $invoice->business_date instanceof Carbon
+                ? $invoice->business_date->toDateString()
+                : (string) $invoice->business_date;
+
+            foreach ($exemptionDrivenLines as $item) {
+                $tariff = $item->tariffVersion?->tariff;
+                $applied = $item->pricingSnapshot?->tax_treatment_key;
+                $expectedType = $applied === 'ZERO_RATED' ? 'ZERO_RATED' : 'VAT_EXEMPT';
+                $effectiveExemption = null;
+
+                foreach (array_filter([$tariff?->service_type, $tariff?->tariff_code]) as $scope) {
+                    $candidate = $taxService->findEffectiveExemption($invoice->customer_id, $invoice->business_date, $scope, $expectedType);
+                    if ($candidate) {
+                        $effectiveExemption = $candidate;
+                        break;
+                    }
+                }
+
+                if (! $effectiveExemption) {
+                    $lineLabel = $item->pricingSnapshot?->tariff_code ?: "line {$item->line_number}";
+                    $errors[] = "Invoice applies customer {$applied} treatment on VATABLE tariff line [{$lineLabel}], but customer has no approved tax exemption of that type covering the service and business date [{$businessDate}].";
+                }
             }
         }
 

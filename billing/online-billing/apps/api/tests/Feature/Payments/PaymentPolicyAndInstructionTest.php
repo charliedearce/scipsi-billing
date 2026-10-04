@@ -8,6 +8,7 @@ use App\Models\CustomerBuyerProfile;
 use App\Models\CustomerUserLink;
 use App\Models\Invoice;
 use App\Models\PaymentGroup;
+use App\Models\PaymentPolicyVersion;
 use App\Models\Role;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
@@ -28,6 +29,7 @@ class PaymentPolicyAndInstructionTest extends TestCase
     {
         parent::setUp();
         $this->seed(DatabaseSeeder::class);
+        PaymentPolicyVersion::query()->delete();
         $this->admin = User::where('email', 'admin@scipsi.test')->firstOrFail();
         $this->customer = Customer::create([
             'organization_id' => $this->admin->organization_id,
@@ -222,6 +224,7 @@ class PaymentPolicyAndInstructionTest extends TestCase
     {
         $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', [
             'customer_id' => $this->customer->id,
+            ...$this->invoiceShipmentPayload(),
             'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => $quantity]],
         ])->assertCreated();
         $id = $draft->json('data.id');

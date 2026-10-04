@@ -1,5 +1,6 @@
 import Echo from 'laravel-echo'
 import Pusher from 'pusher-js'
+import { useUserStore } from '@/store/modules/user'
 
 declare global {
   interface Window {
@@ -21,7 +22,29 @@ export interface RealtimeConfig {
 }
 
 let echoInstance: Echo<'reverb'> | null = null
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+export interface DataRefreshPayload {
+  scope: string
+  entity: string
+  entity_id: number | string | null
+  action: string
+  version: number | null
+  timestamp: string
+}
+
+function resolveAuthToken(): string {
+  try {
+    const { accessToken } = useUserStore()
+    if (accessToken) {
+      return accessToken.startsWith('Bearer ') ? accessToken : `Bearer ${accessToken}`
+    }
+  } catch {
+    // Pinia may be unavailable outside app context
+  }
+  const raw = localStorage.getItem('token') || sessionStorage.getItem('token') || ''
+  if (!raw) return ''
+  return raw.startsWith('Bearer ') ? raw : `Bearer ${raw}`
+}
 
 /**
  * Initialize or retrieve the global Laravel Echo instance.
@@ -41,7 +64,7 @@ export function initEcho(config?: Partial<RealtimeConfig>): Echo<'reverb'> | nul
     return null
   }
 
-  const token = localStorage.getItem('token') || sessionStorage.getItem('token') || ''
+  const token = resolveAuthToken()
 
   try {
     echoInstance = new Echo({
@@ -52,10 +75,10 @@ export function initEcho(config?: Partial<RealtimeConfig>): Echo<'reverb'> | nul
       wssPort: port,
       forceTLS: scheme === 'https',
       enabledTransports: ['ws', 'wss'],
-      authEndpoint: '/api/v1/broadcasting/auth',
+      authEndpoint: config?.auth_endpoint || '/api/v1/broadcasting/auth',
       auth: {
         headers: {
-          Authorization: token ? `Bearer ${token}` : '',
+          Authorization: token,
           Accept: 'application/json'
         }
       }
@@ -87,7 +110,7 @@ export function disconnectEcho(): void {
 export function onDataRefresh(
   orgId: number,
   scope: string,
-  callback: (payload: any) => void,
+  callback: (payload: DataRefreshPayload) => void,
   debounceMs = 400
 ): () => void {
   const echo = initEcho()
@@ -95,8 +118,9 @@ export function onDataRefresh(
     return () => {}
   }
 
-  const channel = echo.private(`org.${orgId}`)
-  const handler = (event: any) => {
+  const channel = echo.private(`scope.${scope}.${orgId}`)
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  const handler = (event: DataRefreshPayload) => {
     if (!scope || event.scope === scope || event.scope === 'all') {
       if (debounceTimer) {
         clearTimeout(debounceTimer)
@@ -110,6 +134,44 @@ export function onDataRefresh(
   channel.listen('.data.refresh', handler)
 
   return () => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+    }
+    channel.stopListening('.data.refresh', handler)
+  }
+}
+
+/**
+ * Listen for user-specific data refresh hints without exposing another customer's activity.
+ */
+export function onUserDataRefresh(
+  userId: number,
+  scope: string,
+  callback: (payload: DataRefreshPayload) => void,
+  debounceMs = 400
+): () => void {
+  const echo = initEcho()
+  if (!echo) {
+    return () => {}
+  }
+
+  const channel = echo.private(`user.${userId}`)
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  const handler = (event: DataRefreshPayload) => {
+    if (!scope || event.scope === scope || event.scope === 'all') {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer)
+      }
+      debounceTimer = setTimeout(() => callback(event), debounceMs)
+    }
+  }
+
+  channel.listen('.data.refresh', handler)
+
+  return () => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+    }
     channel.stopListening('.data.refresh', handler)
   }
 }
@@ -159,5 +221,36 @@ export function onConversationMessage(
 
   return () => {
     channel.stopListening('.message.created', handler)
+  }
+}
+
+export interface ConversationReadPayload {
+  conversation_id: number
+  user_id: number
+  last_read_message_id?: number | null
+  last_read_at?: string | null
+}
+
+/**
+ * Listen for read-receipt updates on a conversation (seen).
+ */
+export function onConversationRead(
+  conversationId: number,
+  callback: (payload: ConversationReadPayload) => void
+): () => void {
+  const echo = initEcho()
+  if (!echo) {
+    return () => {}
+  }
+
+  const channel = echo.private(`conversation.${conversationId}`)
+  const handler = (event: ConversationReadPayload) => {
+    callback(event)
+  }
+
+  channel.listen('.conversation.read', handler)
+
+  return () => {
+    channel.stopListening('.conversation.read', handler)
   }
 }

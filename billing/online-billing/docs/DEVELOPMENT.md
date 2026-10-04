@@ -20,6 +20,34 @@ The start script generates a local PostgreSQL password under ignored `.local/pos
 
 Connection from the Compose application profile: `postgres:5432`, `redis:6379`. From host tools: `127.0.0.1:55432`, `127.0.0.1:56379`. API credentials must load from ignored local configuration. Create an isolated test database before integration testing; do not run reset/migration tests against a shared developer dataset.
 
+## Host PHP API (preferred for day-to-day coding)
+
+Keep Docker for **PostgreSQL**, **Redis**, and optionally **Reverb**. Run Laravel on the host so source edits apply immediately (no `docker cp`).
+
+```powershell
+# Data services only (no app profile)
+./scripts/Start-DevelopmentServices.ps1
+# Stop stale Docker PHP app containers if they were started earlier:
+# docker stop scipsi-online-billing-dev-api-1 scipsi-online-billing-dev-worker-1 scipsi-online-billing-dev-scheduler-1
+
+cd apps/api
+composer install
+# .env: DB_HOST=127.0.0.1 DB_PORT=55432 REDIS_HOST=127.0.0.1 REDIS_PORT=56379
+# REDIS_CLIENT=predis   # Windows host PHP often lacks phpredis
+# REVERB_HOST=127.0.0.1 REVERB_PORT=58080 when Reverb stays in Docker
+php artisan serve --host=127.0.0.1 --port=8000
+# optional second terminal:
+php artisan queue:work redis --sleep=1 --tries=3
+
+cd ../web
+# .env.development: VITE_API_PROXY_URL = http://127.0.0.1:8000
+pnpm.cmd dev
+```
+
+Health check: `Invoke-WebRequest http://127.0.0.1:8000/api/v1/health -UseBasicParsing`.
+
+Private artifact files live under `apps/api/storage/app/private` on the host. PDFs previously written only inside the Docker API volume are not automatically visible to the host process.
+
 ## Docker PHP application runtime
 
 The `app` Compose profile supplies the same PHP runtime to the API, queue worker, scheduler and optional Reverb process. The image includes PostgreSQL, BCMath, PCNTL, mbstring, ZIP and Redis extensions, so local operational checks do not depend on the host PHP installation.

@@ -165,6 +165,7 @@ class ReceiptPostingConcurrencyTest extends TestCase
     {
         $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', [
             'customer_id' => $this->customer->id,
+            ...$this->invoiceShipmentPayload(),
             'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]],
         ]);
         $draft->assertCreated();

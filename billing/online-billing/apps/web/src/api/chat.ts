@@ -78,6 +78,7 @@ export interface PaginatedMessagesResponse {
     per_page: number
     total: number
     last_page: number
+    peer_last_read_message_id?: number | null
   }
 }
 
@@ -115,13 +116,16 @@ export function fetchConversation(id: number) {
 }
 
 export function createConversation(data: CreateConversationPayload) {
-  return request.post<{ message: string; data: Conversation }>({
+  return request.post<Conversation>({
     url: '/api/v1/conversations',
     data
   })
 }
 
-export function fetchMessages(conversationId: number, params?: { page?: number; per_page?: number }) {
+export function fetchMessages(
+  conversationId: number,
+  params?: { page?: number; per_page?: number }
+) {
   return request.get<PaginatedMessagesResponse>({
     url: `/api/v1/conversations/${conversationId}/messages`,
     params
@@ -129,21 +133,51 @@ export function fetchMessages(conversationId: number, params?: { page?: number; 
 }
 
 export function sendMessage(conversationId: number, data: SendMessagePayload) {
-  return request.post<{ message: string; data: ChatMessage }>({
+  return request.post<ChatMessage>({
     url: `/api/v1/conversations/${conversationId}/messages`,
     data
   })
 }
 
 export function markConversationAsRead(conversationId: number) {
-  return request.post<{ message: string }>({
+  return request.post<{
+    conversation_id: number
+    user_id: number
+    last_read_message_id?: number | null
+    last_read_at?: string | null
+    notifications_marked?: number
+  }>({
     url: `/api/v1/conversations/${conversationId}/read`
   })
 }
 
 export function addParticipant(conversationId: number, data: { user_id: number; role?: string }) {
-  return request.post<{ message: string; data: ConversationParticipant }>({
+  return request.post<ConversationParticipant>({
     url: `/api/v1/conversations/${conversationId}/participants`,
     data
+  })
+}
+
+export function ensureConversationForBillingRequest(billingRequestId: number) {
+  return request.post<Conversation>({
+    url: `/api/v1/conversations/for-billing-request/${billingRequestId}`
+  })
+}
+
+export function ensureConversationForBillClaim(billClaimId: number) {
+  return request.post<Conversation>({
+    url: `/api/v1/conversations/for-bill-claim/${billClaimId}`
+  })
+}
+
+export function ensureConversationForInvoice(invoiceId: number) {
+  return request.post<Conversation>({
+    url: `/api/v1/conversations/for-invoice/${invoiceId}`
+  })
+}
+
+export function ensureConversationForReceipt(receiptId: number) {
+  return request.post<Conversation>({
+    url: `/api/v1/conversations/for-receipt/${receiptId}`
   })
 }

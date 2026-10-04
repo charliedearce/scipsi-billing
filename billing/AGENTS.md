@@ -49,3 +49,5 @@ State separately:
 For OR layout changes, preserve the public field names in `OrPrintDataProvider` because saved `.repx` templates bind to them. Add new fields compatibly; do not rename/remove existing fields without a template migration.
 
 For service-billing layout changes, preserve the field names in `ServicePrintDataProvider`. Saved templates bind to the `Bill` table and its `BillItems` relation; add fields compatibly rather than renaming or removing them.
+
+NSCL service invoices use the same data contract but an independent `ServiceBillingNSCL.repx` layout. Routing is based on a trimmed `Items.CargoCode` beginning with `NSCL`, checked before the legacy PPA `frmPrintBill` branch. Preserve that precedence unless the business rule is explicitly changed.

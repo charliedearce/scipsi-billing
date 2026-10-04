@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Invoice;
 use App\Services\Billing\InvoiceDraftService;
 use App\Services\Billing\InvoicePostingService;
+use App\Services\Billing\InvoiceShipment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,22 +18,36 @@ class InvoiceDraftController extends Controller
     ) {}
 
     /**
+     * @return array<string, mixed>
+     */
+    private function surchargeRules(): array
+    {
+        return [
+            'surcharge_mode' => 'nullable|in:NONE,FUEL,DANGEROUS_CARGO',
+            'dangerous_cargo_percent' => 'nullable|numeric|min:0|max:1000',
+        ];
+    }
+
+    /**
      * Preview calculation for draft invoice lines.
      */
     public function calculate(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        $validate = array_merge([
             'customer_id' => 'required|integer',
             'business_date' => 'nullable|date_format:Y-m-d',
             'items' => 'required|array|min:1',
             'items.*.tariff_version_id' => 'nullable|integer',
             'items.*.tariff_code' => 'nullable|string',
             'items.*.tariff_id' => 'nullable|integer',
+            'items.*.service_type' => 'nullable|in:ARRASTRE,STEVEDORING,OTHER',
             'items.*.description' => 'nullable|string|max:255',
             'items.*.quantity' => 'required|numeric|min:0.0001',
             'items.*.unit_rate' => 'nullable|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
-        ]);
+            'route_type' => 'nullable|in:DOMESTIC,FOREIGN',
+        ], $this->surchargeRules());
+        $validated = $request->validate($validate);
 
         $user = $request->user();
         $result = $this->draftService->calculateDraft(
@@ -51,20 +66,20 @@ class InvoiceDraftController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'customer_id' => 'required|integer',
             'business_date' => 'nullable|date_format:Y-m-d',
-            'notes' => 'nullable|string|max:1000',
             'reason' => 'nullable|string|max:255',
             'items' => 'required|array|min:1',
             'items.*.tariff_version_id' => 'nullable|integer',
             'items.*.tariff_code' => 'nullable|string',
             'items.*.tariff_id' => 'nullable|integer',
+            'items.*.service_type' => 'nullable|in:ARRASTRE,STEVEDORING,OTHER',
             'items.*.description' => 'nullable|string|max:255',
             'items.*.quantity' => 'required|numeric|min:0.0001',
             'items.*.unit_rate' => 'nullable|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
-        ]);
+        ], InvoiceShipment::rules(), $this->surchargeRules()));
 
         $user = $request->user();
         $locationId = $user->locations()->wherePivot('is_primary', true)->value('locations.id')
@@ -141,20 +156,20 @@ class InvoiceDraftController extends Controller
         $invoice = Invoice::where('organization_id', $user->organization_id)
             ->findOrFail($id);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'expected_version' => 'required|integer',
             'business_date' => 'nullable|date_format:Y-m-d',
-            'notes' => 'nullable|string|max:1000',
             'reason' => 'nullable|string|max:255',
             'items' => 'required|array|min:1',
             'items.*.tariff_version_id' => 'nullable|integer',
             'items.*.tariff_code' => 'nullable|string',
             'items.*.tariff_id' => 'nullable|integer',
+            'items.*.service_type' => 'nullable|in:ARRASTRE,STEVEDORING,OTHER',
             'items.*.description' => 'nullable|string|max:255',
             'items.*.quantity' => 'required|numeric|min:0.0001',
             'items.*.unit_rate' => 'nullable|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
-        ]);
+        ], InvoiceShipment::rules(), $this->surchargeRules()));
 
         $updatedInvoice = $this->draftService->updateDraft(
             invoice: $invoice,

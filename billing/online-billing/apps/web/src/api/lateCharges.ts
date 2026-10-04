@@ -66,6 +66,13 @@ export function publishLateChargePolicy(id: number, expectedLockVersion: number,
   })
 }
 
+export function deleteLateChargePolicyDraft(id: number, expectedLockVersion: number) {
+  return request.del<{ message?: string }>({
+    url: `/api/v1/admin/late-charge-policies/${id}`,
+    params: { expected_lock_version: expectedLockVersion }
+  })
+}
+
 export function fetchLateChargeAssessments(params?: { status?: string; customer_id?: number }) {
   return request.get({
     url: '/api/v1/admin/late-charge-assessments',

@@ -13,6 +13,8 @@ class Customer extends Model
 {
     use HasFactory;
 
+    public const NON_VIP_ACCOUNT_NUMBER = '11001-0000';
+
     protected $fillable = [
         'organization_id',
         'account_number',
@@ -104,5 +106,10 @@ class Customer extends Model
     public function isPending(): bool
     {
         return $this->status === 'pending';
+    }
+
+    public function isVip(): bool
+    {
+        return strtolower((string) $this->customer_type) === 'vip';
     }
 }

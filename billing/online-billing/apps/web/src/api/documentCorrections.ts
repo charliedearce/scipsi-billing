@@ -19,6 +19,27 @@ export interface DocumentCorrectionRequest {
   requested_at: string
   reviewed_at?: string | null
   target_lock_version: number
+  correction_draft_invoice_id?: number | null
+  replacement_invoice_id?: number | null
+  has_posted_settlement?: boolean
+  correction_draft?: {
+    id: number
+    invoice_number?: string | null
+    status: string
+    business_date?: string
+    currency?: string
+    total_charge_amount?: string
+    lock_version: number
+  } | null
+  replacement_invoice?: {
+    id: number
+    invoice_number?: string | null
+    status: string
+    business_date?: string
+    currency?: string
+    total_charge_amount?: string
+    lock_version: number
+  } | null
   target?: {
     id: number
     location_id?: number | null
@@ -87,5 +108,48 @@ export function rejectDocumentCorrectionRequest(id: number, decisionNotes: strin
   return request.post<DocumentCorrectionRequest>({
     url: `/api/v1/document-correction-requests/${id}/reject`,
     data: { decision_notes: decisionNotes }
+  })
+}
+
+export function executeDocumentCorrectionRequest(
+  id: number,
+  executionNotes: string,
+  expectedVersion?: number | null
+) {
+  return request.post<{
+    correction_request: DocumentCorrectionRequest
+    receipt?: {
+      id: number
+      receipt_number: string
+      status: string
+      applied_amount: string
+      unapplied_amount: string
+      lock_version: number
+      canonical_artifact_id?: number | null
+      canonical_artifact_hash?: string | null
+    }
+    replacement_invoice?: {
+      id: number
+      invoice_number: string
+      status: string
+      business_date?: string
+      total_charge_amount: string
+      lock_version: number
+      canonical_artifact_id?: number | null
+      canonical_artifact_hash?: string | null
+    }
+  }>({
+    url: `/api/v1/document-correction-requests/${id}/execute`,
+    data: {
+      execution_notes: executionNotes,
+      ...(expectedVersion != null ? { expected_version: expectedVersion } : {})
+    }
+  })
+}
+
+export function startDocumentCorrectionDraft(id: number) {
+  return request.post<DocumentCorrectionRequest>({
+    url: `/api/v1/document-correction-requests/${id}/start-draft`,
+    data: {}
   })
 }

@@ -15,11 +15,16 @@ class ReceiptController extends Controller
     {
         $data = $request->validate([
             'source_type' => 'required|string|max:32', 'source_key' => 'required|string|max:128', 'customer_id' => 'required|integer', 'location_id' => 'nullable|integer', 'series_id' => 'nullable|integer', 'business_date' => 'nullable|date_format:Y-m-d', 'backdate_authorization_id' => 'nullable|integer', 'currency' => 'nullable|string|size:3', 'payer_name' => 'nullable|string|max:255',
+            'receipt_kind' => 'nullable|string|in:OFFICIAL,ACKNOWLEDGEMENT',
             'allocations' => 'required|array|min:1', 'allocations.*.invoice_id' => 'required|integer', 'allocations.*.tenders' => 'required|array|min:1', 'allocations.*.tenders.*.type' => 'required|string|in:CASH,BANK_TRANSFER,GATEWAY,CHECK', 'allocations.*.tenders.*.status' => 'required|string|in:CONFIRMED,CLEARED,PENDING,PENDING_REVIEW,PENDING_CLEARANCE,REJECTED', 'allocations.*.tenders.*.amount' => 'required|regex:/^\d+(\.\d{1,2})?$/', 'allocations.*.tenders.*.reference' => 'nullable|string|max:128',
             'allocations.*.withholding_applications' => 'nullable|array', 'allocations.*.withholding_applications.*.certificate_id' => 'required|integer', 'allocations.*.withholding_applications.*.amount' => 'required|regex:/^\d+(\.\d{1,2})?$/',
         ]);
         $receipt = $this->postingService->post($request->user(), $data);
 
-        return response()->json(['message' => 'Collection receipt posted successfully.', 'data' => $receipt]);
+        $message = ($receipt->receipt_kind === 'ACKNOWLEDGEMENT')
+            ? 'Acknowledgement receipt posted successfully. Settlement is recorded internally; this document is not an Official Receipt.'
+            : 'Collection receipt posted successfully.';
+
+        return response()->json(['message' => $message, 'data' => $receipt]);
     }
 }

@@ -1,41 +1,32 @@
 <template>
-  <div class="document-studio-page p-4">
-    <!-- Header -->
-    <div
-      class="header-card mb-4 bg-white p-5 rounded-lg shadow-sm border border-gray-100 flex justify-between items-center"
-    >
-      <div>
-        <div class="flex items-center gap-3">
-          <div
-            class="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xl"
-          >
-            <i class="ri-layout-masonry-line" />
-          </div>
-          <div>
-            <h1 class="text-xl font-bold text-gray-900">Admin Document Studio</h1>
-            <p class="text-sm text-gray-500"
-              >Design, preview, validate, and activate invoice, receipt, and non-fiscal operational
-              snapshot layouts.</p
-            >
+  <div class="document-studio-page page-content space-y-4 p-4 sm:p-6">
+    <ElCard shadow="never" class="art-card">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex min-w-0 items-start gap-3">
+          <ArtSvgIcon icon="ri:layout-masonry-line" class="mt-0.5 shrink-0 text-2xl text-theme" />
+          <div class="min-w-0">
+            <h1 class="text-lg font-semibold text-g-900">Admin Document Studio</h1>
+            <p class="mt-1 text-sm text-g-500">
+              Design, preview, validate, and activate invoice, receipt, and non-fiscal operational
+              snapshot layouts.
+            </p>
           </div>
         </div>
+        <ElButton type="primary" :icon="Plus" @click="openCreateDialog">Create Template</ElButton>
       </div>
-      <div class="flex gap-2">
-        <ElButton type="primary" :icon="Plus" @click="openCreateDialog"> Create Template </ElButton>
-      </div>
-    </div>
+    </ElCard>
 
-    <!-- Navigation Tabs -->
-    <ElTabs v-model="activeTab" class="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
+    <ElTabs v-model="activeTab" class="studio-tabs art-card rounded-lg p-4">
       <ElTabPane label="Templates Master" name="templates">
         <!-- Templates Filter -->
-        <div class="flex justify-between items-center mb-4">
-          <ElRadioGroup v-model="filterKind" size="small">
+        <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+          <ElRadioGroup v-model="filterKind" size="small" class="flex flex-wrap">
             <ElRadioButton label="">All Layouts</ElRadioButton>
             <ElRadioButton label="SERVICE">Service Invoice</ElRadioButton>
             <ElRadioButton label="SERVICE_NSCL">NSCL Invoice</ElRadioButton>
             <ElRadioButton label="PPA">PPA Invoice</ElRadioButton>
             <ElRadioButton label="COLLECTION_RECEIPT">Collection Receipt</ElRadioButton>
+            <ElRadioButton label="ACKNOWLEDGEMENT_RECEIPT">Acknowledgement</ElRadioButton>
             <ElRadioButton label="ACCOUNT_STATEMENT">Account Statement</ElRadioButton>
             <ElRadioButton label="YELLOW_INVOICE">Yellow Transmittal</ElRadioButton>
             <ElRadioButton label="WHITE_RECEIPT">White Transmittal</ElRadioButton>
@@ -47,7 +38,7 @@
         <ElTable :data="filteredTemplates" v-loading="loading" stripe style="width: 100%">
           <ElTableColumn prop="code" label="Template Code" min-width="160">
             <template #default="{ row }">
-              <span class="font-mono font-bold text-indigo-600">{{ row.code }}</span>
+              <span class="font-mono font-bold text-theme">{{ row.code }}</span>
               <ElTag v-if="row.is_system" size="small" type="info" class="ml-2">System</ElTag>
             </template>
           </ElTableColumn>
@@ -71,15 +62,15 @@
                   {{ row.latest_version.status }}
                 </ElTag>
               </span>
-              <span v-else class="text-gray-400">—</span>
+              <span v-else class="text-g-500">—</span>
             </template>
           </ElTableColumn>
           <ElTableColumn label="Published Version" width="140" align="center">
             <template #default="{ row }">
-              <span v-if="row.published_version" class="text-emerald-700 font-semibold">
+              <span v-if="row.published_version" class="font-semibold text-success">
                 v{{ row.published_version.version_number }} (Active)
               </span>
-              <span v-else class="text-amber-600 text-xs">Unpublished Draft</span>
+              <span v-else class="text-xs text-warning">Unpublished Draft</span>
             </template>
           </ElTableColumn>
           <ElTableColumn label="Actions" width="260" align="right">
@@ -101,7 +92,7 @@
       <!-- Active Routes & Activations Tab -->
       <ElTabPane label="Active Routes & Activations" name="activations">
         <div class="flex justify-between items-center mb-4">
-          <p class="text-sm text-gray-500"
+          <p class="text-sm text-g-500"
             >Scheduled and active layout definitions governing current document issuance.</p
           >
           <ElButton size="small" type="primary" :icon="Plus" @click="openActivateDialog">
@@ -119,29 +110,32 @@
           </ElTableColumn>
           <ElTableColumn label="Active Template Version" min-width="200">
             <template #default="{ row }">
-              <span class="font-bold text-gray-800">{{
-                row.template_version?.template?.name || 'Template'
-              }}</span>
-              <span class="ml-2 text-xs font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600"
-                >v{{ row.template_version?.version_number }}</span
-              >
+              <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span class="min-w-0 font-semibold text-g-900">{{
+                  row.template_version?.template?.name || 'Template'
+                }}</span>
+                <span
+                  class="shrink-0 rounded border border-g-300 bg-g-200 px-1.5 py-0.5 font-mono text-xs text-g-800"
+                  >v{{ row.template_version?.version_number }}</span
+                >
+              </div>
             </template>
           </ElTableColumn>
           <ElTableColumn label="Location Scope" width="160">
             <template #default="{ row }">
               <span v-if="row.location">{{ row.location.name }}</span>
-              <span v-else class="text-gray-400 italic">All Locations (Global)</span>
+              <span v-else class="italic text-g-500">All Locations (Global)</span>
             </template>
           </ElTableColumn>
           <ElTableColumn label="Series Scope" width="160">
             <template #default="{ row }">
               <span v-if="row.series" class="font-mono">{{ row.series.series_code }}</span>
-              <span v-else class="text-gray-400 italic">All Series (Default)</span>
+              <span v-else class="italic text-g-500">All Series (Default)</span>
             </template>
           </ElTableColumn>
           <ElTableColumn prop="effective_from" label="Effective From" width="180">
             <template #default="{ row }">
-              <span class="text-xs text-gray-700">{{ formatDateTime(row.effective_from) }}</span>
+              <span class="text-xs text-g-800">{{ formatDateTime(row.effective_from) }}</span>
             </template>
           </ElTableColumn>
           <ElTableColumn prop="is_active" label="State" width="100" align="center">
@@ -157,8 +151,8 @@
       <ElTabPane label="Branding Assets" name="assets">
         <div class="flex justify-between items-center mb-4">
           <div>
-            <p class="text-sm text-gray-700 font-medium">Private branding assets</p>
-            <p class="text-xs text-gray-500 mt-1"
+            <p class="text-sm font-medium text-g-800">Private branding assets</p>
+            <p class="mt-1 text-xs text-g-500"
               >PNG and JPEG only (up to 2 MB). Retiring an asset blocks new draft use, while
               published layouts and issued PDFs retain their historical rendering source.</p
             >
@@ -201,7 +195,7 @@
               >
                 Retire
               </ElButton>
-              <span v-else class="text-xs text-gray-400">{{
+              <span v-else class="text-xs text-g-500">{{
                 row.retirement_reason || 'Retired'
               }}</span>
             </template>
@@ -214,16 +208,15 @@
     <ElDrawer
       v-model="editorVisible"
       :title="`Document Studio — ${selectedTemplate?.name || ''}`"
-      size="80%"
+      size="96%"
       destroy-on-close
     >
-      <div v-if="selectedTemplate" class="studio-editor flex flex-col h-full gap-4">
-        <!-- Editor Toolbar -->
+      <div v-if="selectedTemplate" class="studio-editor flex h-full flex-col gap-4">
         <div
-          class="flex justify-between items-center p-3 bg-gray-50 rounded border border-gray-200"
+          class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-g-300 bg-g-200 p-3"
         >
-          <div class="flex items-center gap-3">
-            <span class="font-bold text-gray-700">Version:</span>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="font-semibold text-g-800">Version:</span>
             <ElSelect
               v-model="selectedVersionId"
               size="small"
@@ -245,7 +238,7 @@
               {{ currentVersion.status }}
             </ElTag>
           </div>
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
             <ElButton
               v-if="canEditCurrentVersion"
               size="small"
@@ -267,7 +260,7 @@
               :loading="previewLoading"
               @click="loadPreview"
             >
-              Preview PDF
+              Refresh preview
             </ElButton>
             <ElButton
               v-if="canEditCurrentVersion"
@@ -277,28 +270,6 @@
               @click="saveDraftLayout"
             >
               Save Draft
-            </ElButton>
-            <ElSelect
-              v-if="canEditCurrentVersion && activeAssets.length > 0"
-              v-model="selectedAssetId"
-              size="small"
-              class="w-48"
-              placeholder="Branding asset"
-            >
-              <ElOption
-                v-for="asset in activeAssets"
-                :key="asset.id"
-                :label="`${asset.name} (${asset.asset_type})`"
-                :value="asset.id"
-              />
-            </ElSelect>
-            <ElButton
-              v-if="canEditCurrentVersion && selectedAssetId"
-              size="small"
-              type="info"
-              @click="insertSelectedAsset"
-            >
-              Insert Image
             </ElButton>
             <ElButton
               v-if="currentVersion?.status === 'VALIDATED'"
@@ -325,20 +296,19 @@
         <!-- Validation Summary Alert -->
         <div
           v-if="validationResult"
-          class="p-3 rounded border"
+          class="rounded-lg border p-3"
           :class="
             validationResult.fiscal_valid
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              : 'bg-rose-50 border-rose-200 text-rose-800'
+              ? 'border-success/30 bg-success/12 text-success'
+              : 'border-error/30 bg-error/12 text-error'
           "
         >
-          <div class="font-bold flex items-center gap-2">
-            <i
-              :class="
-                validationResult.fiscal_valid
-                  ? 'ri-checkbox-circle-fill text-emerald-600'
-                  : 'ri-error-warning-fill text-rose-600'
+          <div class="flex items-center gap-2 font-semibold">
+            <ArtSvgIcon
+              :icon="
+                validationResult.fiscal_valid ? 'ri:checkbox-circle-fill' : 'ri:error-warning-fill'
               "
+              class="text-lg"
             />
             <span>{{
               validationResult.fiscal_valid
@@ -356,37 +326,28 @@
           </ul>
         </div>
 
-        <!-- Split View: JSON Layout Editor & Live PDF Preview -->
-        <div class="flex-1 grid grid-cols-2 gap-4 min-h-[500px]">
-          <!-- Left: Layout JSON -->
-          <div class="flex flex-col border border-gray-200 rounded p-3 bg-white">
-            <div class="flex justify-between items-center mb-2">
-              <span class="text-xs font-bold text-gray-600 uppercase"
-                >JSON Layout Definition (Physical Units: mm)</span
-              >
-              <span
-                v-if="currentVersion?.status === 'PUBLISHED'"
-                class="text-xs text-amber-600 italic"
-                >Read-only (Published versions are immutable)</span
-              >
-            </div>
-            <ElInput
+        <!-- Split View: visual layout designer and server PDF preview -->
+        <div
+          class="grid min-h-[500px] flex-1 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(300px,0.7fr)]"
+        >
+          <div class="flex min-h-0 flex-col rounded-lg border border-g-300 bg-box p-3">
+            <LayoutCanvas
               v-model="layoutJsonText"
-              type="textarea"
-              :rows="24"
-              :readonly="!canEditCurrentVersion"
-              class="font-mono text-xs flex-1"
+              :editable="canEditCurrentVersion"
+              :document-kind="selectedTemplate?.document_kind || ''"
+              :assets="activeAssets"
             />
           </div>
 
           <!-- Right: Live PDF Preview -->
-          <div class="flex flex-col border border-gray-200 rounded p-3 bg-gray-100">
-            <div class="flex justify-between items-center mb-2">
-              <span class="text-xs font-bold text-gray-600 uppercase"
-                >Server-Rendered PDF Preview (Dompdf)</span
+          <div class="flex flex-col rounded-lg border border-g-300 bg-g-200 p-3">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <span class="text-xs font-semibold uppercase tracking-wide text-g-600"
+                >Live preview</span
               >
+              <span v-if="previewLoading" class="text-xs text-g-500">Updating preview…</span>
               <ElButton
-                v-if="previewPdfBase64"
+                v-else-if="previewPdfBase64"
                 size="small"
                 link
                 type="primary"
@@ -394,16 +355,27 @@
                 >Download</ElButton
               >
             </div>
-            <div v-if="previewPdfBase64" class="flex-1 border rounded bg-white overflow-hidden">
+            <p v-if="previewError" class="mb-2 text-xs text-error">{{ previewError }}</p>
+            <div
+              v-if="previewPdfBase64"
+              class="relative flex-1 overflow-hidden rounded-lg border border-g-300 bg-g-100"
+            >
               <iframe
+                :key="previewFrameKey"
                 :src="`data:application/pdf;base64,${previewPdfBase64}`"
-                class="w-full h-full"
+                class="h-full w-full"
                 style="min-height: 520px"
               />
             </div>
-            <div v-else class="flex-1 flex flex-col items-center justify-center text-gray-400">
-              <i class="ri-file-pdf-line text-5xl mb-2" />
-              <p class="text-xs">Click "Preview PDF" to compile layout into high-fidelity PDF</p>
+            <div v-else class="flex flex-1 flex-col items-center justify-center text-g-500">
+              <ArtSvgIcon icon="ri:file-pdf-line" class="mb-2 text-5xl" />
+              <p class="text-xs">
+                {{
+                  previewLoading
+                    ? 'Preparing the server preview…'
+                    : 'The preview appears here as you design.'
+                }}
+              </p>
             </div>
           </div>
         </div>
@@ -419,6 +391,7 @@
             <ElOption label="NSCL Cargo Service Sales Invoice" value="SERVICE_NSCL" />
             <ElOption label="PPA Applicable Cargo Sales Invoice" value="PPA" />
             <ElOption label="Collection Receipt / Official Receipt" value="COLLECTION_RECEIPT" />
+            <ElOption label="Acknowledgement Receipt (not OR)" value="ACKNOWLEDGEMENT_RECEIPT" />
             <ElOption label="Account Statement (non-fiscal)" value="ACCOUNT_STATEMENT" />
             <ElOption label="Yellow Invoice Transmittal (non-fiscal)" value="YELLOW_INVOICE" />
             <ElOption label="White Receipt Transmittal (non-fiscal)" value="WHITE_RECEIPT" />
@@ -474,9 +447,7 @@
             class="block w-full text-sm"
             @change="onAssetFileSelected"
           />
-          <p v-if="assetUploadFile" class="text-xs text-gray-500 mt-2">{{
-            assetUploadFile.name
-          }}</p>
+          <p v-if="assetUploadFile" class="mt-2 text-xs text-g-500">{{ assetUploadFile.name }}</p>
         </ElFormItem>
       </ElForm>
       <template #footer>
@@ -512,8 +483,10 @@
 </template>
 
 <script setup lang="ts">
-  import { ref, computed, onMounted } from 'vue'
+  import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+  import LayoutCanvas from './LayoutCanvas.vue'
   import { ElMessage, ElMessageBox } from 'element-plus'
+  import { HttpError } from '@/utils/http/error'
   import { Plus, Refresh, Check, Document } from '@element-plus/icons-vue'
   import {
     fetchTemplates,
@@ -558,12 +531,13 @@
   const layoutJsonText = ref('')
   const previewPdfBase64 = ref('')
   const previewLoading = ref(false)
+  const previewError = ref('')
+  const previewFrameKey = ref(0)
   const validating = ref(false)
   const saving = ref(false)
   const publishing = ref(false)
   const retiring = ref(false)
   const validationResult = ref<any>(null)
-  const selectedAssetId = ref<number | null>(null)
 
   const assetUploadDialogVisible = ref(false)
   const uploadingAsset = ref(false)
@@ -611,6 +585,60 @@
   )
   const activeAssets = computed(() => assets.value.filter((asset) => asset.status === 'ACTIVE'))
 
+  let previewTimer: ReturnType<typeof setTimeout> | null = null
+  let previewSerial = 0
+
+  function scheduleLivePreview(delay = 700) {
+    if (!editorVisible.value) return
+    if (previewTimer) clearTimeout(previewTimer)
+    previewLoading.value = true
+    previewTimer = setTimeout(() => {
+      void refreshLivePreview()
+    }, delay)
+  }
+
+  async function refreshLivePreview() {
+    if (!editorVisible.value || !selectedTemplate.value || !currentVersion.value) return
+    let layout: Record<string, unknown> | undefined
+    if (canEditCurrentVersion.value) {
+      try {
+        layout = JSON.parse(layoutJsonText.value) as Record<string, unknown>
+        previewError.value = ''
+      } catch {
+        previewError.value = 'The layout needs valid JSON before the preview can update.'
+        previewLoading.value = false
+        return
+      }
+    }
+
+    const serial = ++previewSerial
+    previewLoading.value = true
+    try {
+      const preview = await previewTemplateVersion(
+        selectedTemplate.value.id,
+        currentVersion.value.id,
+        layout
+      )
+      if (serial !== previewSerial || !editorVisible.value) return
+      previewPdfBase64.value = preview.pdf_base64
+      previewFrameKey.value += 1
+      previewError.value = ''
+    } catch (err: unknown) {
+      if (serial !== previewSerial) return
+      previewError.value = err instanceof Error ? err.message : 'The preview could not be rendered.'
+    } finally {
+      if (serial === previewSerial) previewLoading.value = false
+    }
+  }
+
+  function loadPreview() {
+    scheduleLivePreview(0)
+  }
+
+  watch(layoutJsonText, () => {
+    if (editorVisible.value) scheduleLivePreview()
+  })
+
   const publishedVersionOptions = computed(() => {
     const list: Array<{
       id: number
@@ -619,15 +647,16 @@
       document_kind: string
     }> = []
     templates.value.forEach((t) => {
-      t.versions?.forEach((v) => {
-        if (v.status === 'PUBLISHED') {
-          list.push({
-            id: v.id,
-            template_name: t.name,
-            version_number: v.version_number,
-            document_kind: t.document_kind
-          })
-        }
+      const fromVersions = t.versions?.filter((v) => v.status === 'PUBLISHED') ?? []
+      const published =
+        fromVersions.length > 0 ? fromVersions : t.published_version ? [t.published_version] : []
+      published.forEach((v) => {
+        list.push({
+          id: v.id,
+          template_name: t.name,
+          version_number: v.version_number,
+          document_kind: t.document_kind
+        })
       })
     })
     return list
@@ -643,6 +672,8 @@
         return 'warning'
       case 'COLLECTION_RECEIPT':
         return 'danger'
+      case 'ACKNOWLEDGEMENT_RECEIPT':
+        return 'warning'
       case 'ACCOUNT_STATEMENT':
         return 'info'
       case 'YELLOW_INVOICE':
@@ -674,6 +705,12 @@
     return new Date(str).toLocaleString()
   }
 
+  function validationSummaryFromError(err: unknown) {
+    if (!(err instanceof HttpError) || !err.data || typeof err.data !== 'object') return null
+    const body = err.data as { data?: DocumentTemplateVersion['validation_summary'] }
+    return body.data ?? null
+  }
+
   function formatBytes(bytes: number) {
     if (bytes < 1024) return `${bytes} B`
     return `${(bytes / 1024).toFixed(1)} KB`
@@ -682,8 +719,7 @@
   async function loadData() {
     loading.value = true
     try {
-      const res = await fetchTemplates()
-      templates.value = res.data
+      templates.value = await fetchTemplates()
     } catch (err: any) {
       ElMessage.error(err?.message || 'Failed to load templates')
     } finally {
@@ -697,8 +733,7 @@
   async function loadActivations() {
     loadingActivations.value = true
     try {
-      const res = await fetchActivations()
-      activations.value = res.data
+      activations.value = await fetchActivations()
     } catch (err: any) {
       ElMessage.error(err?.message || 'Failed to load activations')
     } finally {
@@ -709,16 +744,7 @@
   async function loadAssets() {
     loadingAssets.value = true
     try {
-      const res = await fetchDocumentTemplateAssets()
-      assets.value = res.data
-      if (
-        selectedAssetId.value &&
-        !assets.value.some(
-          (asset) => asset.id === selectedAssetId.value && asset.status === 'ACTIVE'
-        )
-      ) {
-        selectedAssetId.value = null
-      }
+      assets.value = await fetchDocumentTemplateAssets()
     } catch (err: any) {
       ElMessage.error(err?.message || 'Failed to load branding assets')
     } finally {
@@ -729,9 +755,9 @@
   async function openEditor(template: DocumentTemplate) {
     loading.value = true
     try {
-      const res = await fetchTemplate(template.id)
-      selectedTemplate.value = res.data
-      const versions = res.data.versions || []
+      const templateDetail = await fetchTemplate(template.id)
+      selectedTemplate.value = templateDetail
+      const versions = templateDetail.versions || []
       if (versions.length > 0) {
         selectedVersionId.value = versions[0].id
         currentVersion.value = versions[0]
@@ -739,7 +765,9 @@
         validationResult.value = versions[0].validation_summary
       }
       previewPdfBase64.value = ''
+      previewError.value = ''
       editorVisible.value = true
+      scheduleLivePreview(200)
     } catch (err: any) {
       ElMessage.error(err?.message || 'Failed to load template details')
     } finally {
@@ -754,6 +782,7 @@
       layoutJsonText.value = JSON.stringify(version.layout_definition, null, 2)
       validationResult.value = version.validation_summary
       previewPdfBase64.value = ''
+      previewError.value = ''
     }
   }
 
@@ -780,42 +809,17 @@
 
     saving.value = true
     try {
-      const res = await updateDraftVersion(
+      currentVersion.value = await updateDraftVersion(
         selectedTemplate.value.id,
         currentVersion.value.id,
         parsed
       )
-      currentVersion.value = res.data
       ElMessage.success('Draft layout updated successfully.')
     } catch (err: any) {
       ElMessage.error(err?.message || 'Failed to save layout')
     } finally {
       saving.value = false
     }
-  }
-
-  function insertSelectedAsset() {
-    if (!selectedAssetId.value) return
-    let parsed: any
-    try {
-      parsed = JSON.parse(layoutJsonText.value)
-    } catch {
-      ElMessage.error('Fix the layout JSON before inserting an image.')
-      return
-    }
-    parsed.bands = parsed.bands || {}
-    parsed.bands.header = parsed.bands.header || { height_mm: 30, elements: [] }
-    parsed.bands.header.elements = parsed.bands.header.elements || []
-    parsed.bands.header.elements.push({
-      type: 'image',
-      asset_id: selectedAssetId.value,
-      x_mm: 0,
-      y_mm: 0,
-      width_mm: 32,
-      height_mm: 20
-    })
-    layoutJsonText.value = JSON.stringify(parsed, null, 2)
-    ElMessage.success('Image element inserted. Adjust its mm geometry, then save the draft.')
   }
 
   function openAssetUploadDialog() {
@@ -878,33 +882,25 @@
 
     validating.value = true
     try {
-      const res = await validateTemplateVersion(selectedTemplate.value.id, currentVersion.value.id)
-      validationResult.value = res.data
-      if (res.data.fiscal_valid) {
+      const summary = await validateTemplateVersion(
+        selectedTemplate.value.id,
+        currentVersion.value.id
+      )
+      validationResult.value = summary
+      if (summary.fiscal_valid) {
         ElMessage.success('Layout passed fiscal and structural validation.')
         currentVersion.value.status = 'VALIDATED'
       } else {
         ElMessage.warning('Layout has missing fiscal fields or statutory notices.')
       }
-    } catch (err: any) {
-      validationResult.value = err?.response?.data?.data || null
-      ElMessage.error('Fiscal validation failed.')
+    } catch (err: unknown) {
+      const summary = validationSummaryFromError(err)
+      validationResult.value = summary
+      if (!summary) {
+        ElMessage.error(err instanceof Error ? err.message : 'Fiscal validation failed.')
+      }
     } finally {
       validating.value = false
-    }
-  }
-
-  async function loadPreview() {
-    if (!selectedTemplate.value || !currentVersion.value) return
-
-    previewLoading.value = true
-    try {
-      const res = await previewTemplateVersion(selectedTemplate.value.id, currentVersion.value.id)
-      previewPdfBase64.value = res.data.pdf_base64
-    } catch (err: any) {
-      ElMessage.error(err?.message || 'Failed to generate PDF preview')
-    } finally {
-      previewLoading.value = false
     }
   }
 
@@ -914,7 +910,6 @@
 
     try {
       await openEditor(template)
-      loadPreview()
     } catch (err: any) {
       ElMessage.error(err?.message || 'Failed to preview template')
     }
@@ -925,8 +920,10 @@
 
     publishing.value = true
     try {
-      const res = await publishTemplateVersion(selectedTemplate.value.id, currentVersion.value.id)
-      currentVersion.value = res.data
+      currentVersion.value = await publishTemplateVersion(
+        selectedTemplate.value.id,
+        currentVersion.value.id
+      )
       ElMessage.success('Version published immutably. Ready for route activation.')
       loadData()
     } catch (err: any) {
@@ -952,12 +949,11 @@
       )
 
       retiring.value = true
-      const res = await retireTemplateVersion(
+      currentVersion.value = await retireTemplateVersion(
         selectedTemplate.value.id,
         currentVersion.value.id,
         value.trim()
       )
-      currentVersion.value = res.data
       ElMessage.success(
         'Template version retired. Historical layout and artifacts remain available.'
       )
@@ -1036,10 +1032,25 @@
   onMounted(() => {
     loadData()
   })
+
+  onBeforeUnmount(() => {
+    if (previewTimer) clearTimeout(previewTimer)
+  })
 </script>
 
 <style scoped>
   .document-studio-page {
     min-height: calc(100vh - 120px);
+  }
+
+  .studio-tabs {
+    background: var(--default-box-color);
+    border: 1px solid var(--art-card-border);
+  }
+
+  .studio-editor :deep(.el-textarea__inner) {
+    background-color: var(--default-box-color);
+    color: var(--art-gray-800);
+    box-shadow: 0 0 0 1px var(--art-card-border) inset;
   }
 </style>

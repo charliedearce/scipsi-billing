@@ -3,6 +3,11 @@
 namespace Database\Seeders;
 
 use App\Models\AccountingPeriod;
+use App\Models\BuyerProfileVersion;
+use App\Models\Customer;
+use App\Models\CustomerBuyerProfile;
+use App\Models\CustomerContactPoint;
+use App\Models\CustomerUserLink;
 use App\Models\DocumentRequirement;
 use App\Models\DocumentSeries;
 use App\Models\DocumentTemplate;
@@ -18,12 +23,15 @@ use App\Models\NotificationPolicyVersion;
 use App\Models\NotificationTemplate;
 use App\Models\NotificationTemplateVersion;
 use App\Models\Organization;
+use App\Models\PaymentPolicyVersion;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\Tariff;
 use App\Models\TariffVersion;
 use App\Models\TaxpayerProfileVersion;
 use App\Models\User;
+use App\Models\Vessel;
+use App\Services\Billing\LegacyTariffCatalog;
 use App\Services\DocumentStudio\DocumentStudioService;
 use App\Services\Sms\SmsTemplateService;
 use Illuminate\Database\Seeder;
@@ -53,6 +61,7 @@ class DatabaseSeeder extends Seeder
             // Configuration
             ['name' => 'settings:read', 'category' => 'Configuration', 'description' => 'View application settings'],
             ['name' => 'settings:update', 'category' => 'Configuration', 'description' => 'Update application settings'],
+            ['name' => 'document_series:manage', 'category' => 'Billing', 'description' => 'View document number series and update prefixes for future allocations'],
             ['name' => 'periods:view', 'category' => 'Billing', 'description' => 'View accounting periods'],
             ['name' => 'periods:manage', 'category' => 'Billing', 'description' => 'Open and close accounting periods'],
             ['name' => 'backdates:view', 'category' => 'Billing', 'description' => 'View permitted backdate authorization records'],
@@ -216,6 +225,8 @@ class DatabaseSeeder extends Seeder
             ['name' => 'South Cotabato Integrated Port Services, Inc.', 'is_active' => true]
         );
 
+        $this->seedVessels($org);
+
         // 3. Seed Primary Location
         $loc = Location::firstOrCreate(
             ['organization_id' => $org->id, 'code' => 'GENSAN'],
@@ -372,6 +383,84 @@ class DatabaseSeeder extends Seeder
         $customer1->roles()->syncWithoutDetaching([$customerRole->id]);
         $customer1->locations()->syncWithoutDetaching([$loc->id => ['is_primary' => true]]);
 
+        $customerAccount = Customer::updateOrCreate(
+            ['account_number' => 'SCIPSI-DEMO-0001'],
+            [
+                'organization_id' => $org->id,
+                'name' => 'Andres Shipping Corp.',
+                'status' => 'active',
+                'customer_type' => 'business',
+                'lock_version' => 1,
+            ]
+        );
+
+        CustomerUserLink::updateOrCreate(
+            [
+                'customer_id' => $customerAccount->id,
+                'user_id' => $customer1->id,
+            ],
+            [
+                'authority_role' => 'owner',
+                'is_active' => true,
+                'linked_at' => now(),
+                'approved_by_user_id' => $adminUser->id,
+            ]
+        );
+
+        $buyerProfile = CustomerBuyerProfile::updateOrCreate(
+            ['customer_id' => $customerAccount->id],
+            [
+                'current_version' => 1,
+                'is_active' => true,
+            ]
+        );
+
+        BuyerProfileVersion::updateOrCreate(
+            [
+                'buyer_profile_id' => $buyerProfile->id,
+                'version' => 1,
+            ],
+            [
+                'registered_name' => 'Andres Shipping Corp.',
+                'tin' => '000-000-000-000',
+                'branch_code' => '00000',
+                'tax_classification' => 'REGULAR',
+                'billing_address' => [
+                    'street' => 'Makar Wharf',
+                    'city' => 'General Santos City',
+                    'province' => 'South Cotabato',
+                ],
+                'contact_email' => $customer1->email,
+                'contact_phone' => $customer1->phone,
+                'effective_from' => now(),
+                'status' => 'active',
+                'created_by_user_id' => $adminUser->id,
+                'reviewed_by_user_id' => $adminUser->id,
+            ]
+        );
+
+        foreach ([
+            'email' => $customer1->email,
+            'mobile' => $customer1->phone,
+        ] as $type => $value) {
+            CustomerContactPoint::updateOrCreate(
+                [
+                    'customer_id' => $customerAccount->id,
+                    'user_id' => $customer1->id,
+                    'type' => $type,
+                ],
+                [
+                    'organization_id' => $org->id,
+                    'value' => $value,
+                    'is_verified' => true,
+                    'verified_at' => now(),
+                    'status' => 'active',
+                    'version' => 1,
+                    'lock_version' => 1,
+                ]
+            );
+        }
+
         // 6. Seed Default Named Document Types (W21 / P1-07)
         $docTypes = [
             [
@@ -421,6 +510,16 @@ class DatabaseSeeder extends Seeder
                 'purpose' => 'PAYMENT_PROOF',
                 'allowed_mime_types' => ['application/pdf', 'image/jpeg', 'image/png'],
                 'max_file_size_kb' => 5120,
+                'max_files' => 1,
+                'is_active' => true,
+            ],
+            [
+                'code' => 'PROFILE_AVATAR',
+                'name' => 'Portal Profile Picture',
+                'description' => 'Optional customer portal profile photograph (JPEG/PNG/WebP).',
+                'purpose' => 'PROFILE_AVATAR',
+                'allowed_mime_types' => ['image/jpeg', 'image/png', 'image/webp'],
+                'max_file_size_kb' => 2048,
                 'max_files' => 1,
                 'is_active' => true,
             ],
@@ -480,6 +579,12 @@ class DatabaseSeeder extends Seeder
                 'body' => 'Hello {{ recipient_name }}, your billing request {{ reference_no }} requires document correction. Please log in to your portal account to review remarks. {{ org_name }}.',
             ],
             [
+                'code' => 'BILLING_REQUEST_CANCELLED',
+                'name' => 'Billing Request Cancelled Notice',
+                'template_class' => 'CONTRACTUAL_TRANSACTIONAL',
+                'body' => 'Hello {{ recipient_name }}, your billing request {{ reference_no }} was cancelled ({{ action_label }}). Please sign in to your portal account for details. {{ org_name }}.',
+            ],
+            [
                 'code' => 'INVOICE_ARTIFACT_READY',
                 'name' => 'Invoice Ready Notice',
                 'template_class' => 'CONTRACTUAL_TRANSACTIONAL',
@@ -490,6 +595,12 @@ class DatabaseSeeder extends Seeder
                 'name' => 'Collection Receipt Ready Notice',
                 'template_class' => 'CONTRACTUAL_TRANSACTIONAL',
                 'body' => 'Hello {{ recipient_name }}, your collection receipt {{ reference_no }} is ready. Please sign in to your portal account to review. {{ org_name }}.',
+            ],
+            [
+                'code' => 'RECEIPT_REVERSED',
+                'name' => 'Collection Receipt Reversal Notice',
+                'template_class' => 'CONTRACTUAL_TRANSACTIONAL',
+                'body' => 'Hello {{ recipient_name }}, {{ action_label }} for {{ reference_no }} was recorded on {{ date_formatted }}. Please sign in to your portal account to review. {{ org_name }}.',
             ],
             [
                 'code' => 'BILL_CLAIM_CODE_ISSUED',
@@ -520,6 +631,12 @@ class DatabaseSeeder extends Seeder
                 'name' => 'Tax Evidence Revoked Notice',
                 'template_class' => 'CONTRACTUAL_TRANSACTIONAL',
                 'body' => 'Hello {{ recipient_name }}, a previously submitted tax document has been revoked. Please log in to your portal account for details. {{ org_name }}.',
+            ],
+            [
+                'code' => 'TAX_EVIDENCE_EXPIRED',
+                'name' => 'Tax Evidence Expired Notice',
+                'template_class' => 'CONTRACTUAL_TRANSACTIONAL',
+                'body' => 'Hello {{ recipient_name }}, your tax evidence has expired. Please log in to your portal account to file a renewal with updated validity. {{ org_name }}.',
             ],
             [
                 'code' => 'PAYMENT_INSTRUCTIONS_ISSUED',
@@ -650,11 +767,14 @@ class DatabaseSeeder extends Seeder
 
         foreach ($defaultTariffs as $tariffData) {
             $tariff = Tariff::firstOrCreate(
-                ['organization_id' => $org->id, 'tariff_code' => $tariffData['code']],
                 [
-                    'name' => $tariffData['name'],
+                    'organization_id' => $org->id,
+                    'tariff_code' => $tariffData['code'],
                     'service_type' => $tariffData['service_type'],
                     'route_type' => $tariffData['route_type'],
+                ],
+                [
+                    'name' => $tariffData['name'],
                     'unit_of_measure' => $tariffData['unit_of_measure'],
                     'is_active' => true,
                 ]
@@ -674,6 +794,8 @@ class DatabaseSeeder extends Seeder
                 ]
             );
         }
+
+        $this->seedLegacyTariffs($org, $adminUser);
 
         // 10. Seed Fuel Surcharge Schedule & Active Observation (Decision W29 / P2-01 / P2-10)
         $fuelObservation = FuelPriceObservation::firstOrCreate(
@@ -760,6 +882,20 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
+        DocumentSeries::firstOrCreate(
+            ['organization_id' => $org->id, 'series_code' => 'ACK-GENSAN-2026'],
+            [
+                'location_id' => $loc->id,
+                'document_type' => 'ACKNOWLEDGEMENT_RECEIPT',
+                'prefix' => 'ACK-',
+                'current_number' => 0,
+                'start_number' => 1,
+                'end_number' => null,
+                'padding_length' => 10,
+                'is_active' => true,
+            ]
+        );
+
         // 12. Seed Default Document Studio Template & Activation (Decision W28 / P2-03)
         $studioService = app(DocumentStudioService::class);
         $defaultLayout = $studioService->getDefaultSalesInvoiceLayout();
@@ -819,6 +955,19 @@ class DatabaseSeeder extends Seeder
         DocumentTemplateActivation::firstOrCreate(
             ['organization_id' => $org->id, 'document_kind' => 'COLLECTION_RECEIPT', 'location_id' => null, 'series_id' => null],
             ['template_version_id' => $receiptVersion->id, 'effective_from' => now()->subDay(), 'is_active' => true, 'activated_by_user_id' => $adminUser->id]
+        );
+
+        $ackTemplate = DocumentTemplate::firstOrCreate(
+            ['organization_id' => $org->id, 'code' => 'ACK-RECEIPT-DEFAULT'],
+            ['document_kind' => 'ACKNOWLEDGEMENT_RECEIPT', 'name' => 'Standard Acknowledgement Receipt Layout (Letter)', 'description' => 'Internal acknowledgement receipt. Not an Official Receipt; settlement is recorded without BIR OR labeling.', 'is_system' => true]
+        );
+        $ackVersion = DocumentTemplateVersion::firstOrCreate(
+            ['template_id' => $ackTemplate->id, 'version_number' => 1],
+            ['status' => 'PUBLISHED', 'layout_schema_version' => '1.0.0', 'layout_definition' => $studioService->getDefaultAcknowledgementReceiptLayout(), 'validation_summary' => ['structure_valid' => true, 'fiscal_valid' => true, 'missing_fields' => [], 'missing_elements' => [], 'errors' => []], 'created_by_user_id' => $adminUser->id, 'published_by_user_id' => $adminUser->id, 'published_at' => now()]
+        );
+        DocumentTemplateActivation::firstOrCreate(
+            ['organization_id' => $org->id, 'document_kind' => 'ACKNOWLEDGEMENT_RECEIPT', 'location_id' => null, 'series_id' => null],
+            ['template_version_id' => $ackVersion->id, 'effective_from' => now()->subDay(), 'is_active' => true, 'activated_by_user_id' => $adminUser->id]
         );
 
         // 13. Seed non-fiscal operational snapshot layouts (P4-02).
@@ -917,6 +1066,86 @@ class DatabaseSeeder extends Seeder
                     'invoice_legend' => $rule['invoice_legend'],
                     'legal_basis' => $rule['legal_basis'],
                     'effective_from' => now()->subMonths(6),
+                    'is_active' => true,
+                ]
+            );
+        }
+
+        // 15. Seed a published manual payment-route policy (P3-05 / W25 pay path)
+        // Gateway stays off until P3-06; customers need an effective published version
+        // before selected-bill payment instructions can be issued.
+        PaymentPolicyVersion::firstOrCreate(
+            [
+                'organization_id' => $org->id,
+                'version_number' => 1,
+            ],
+            [
+                'currency' => 'PHP',
+                'gateway_enabled' => false,
+                'manual_instructions' => "Deposit to SCIPSI's approved receiving bank account. Keep the bank transaction reference for proof upload and teller review.",
+                'manual_deadline_hours' => 48,
+                'review_target_hours' => 24,
+                'clearance_target_hours' => 48,
+                'correction_window_hours' => 24,
+                'status' => PaymentPolicyVersion::STATUS_PUBLISHED,
+                'effective_from' => now('Asia/Manila')->subDay(),
+                'created_by_user_id' => $adminUser->id,
+                'published_by_user_id' => $adminUser->id,
+                'published_at' => now('Asia/Manila')->subDay(),
+                'publication_reason' => 'Seeded default manual payment-route policy for selected-bill instructions.',
+                'lock_version' => 1,
+            ]
+        );
+    }
+
+    private function seedLegacyTariffs(Organization $org, User $adminUser): void
+    {
+        if (app()->environment('testing')) {
+            return;
+        }
+
+        $path = database_path('seeders/data/legacy-tariffs.json');
+        if (! is_file($path)) {
+            return;
+        }
+
+        $raw = preg_replace('/^\xEF\xBB\xBF/', '', (string) file_get_contents($path));
+        $rows = json_decode($raw, true);
+        if (! is_array($rows) || $rows === []) {
+            return;
+        }
+
+        (new LegacyTariffCatalog)->seedInto($org, $rows, $adminUser->id);
+    }
+
+    private function seedVessels(Organization $org): void
+    {
+        $catalog = [
+            ['name' => 'HONDURAS', 'vessel_type' => 'Non Containerized', 'typical_route' => 'DOMESTIC', 'shipping_line' => 'SJ SHIPPING LINES'],
+            ['name' => 'HANEBURG', 'vessel_type' => 'Containerized', 'typical_route' => 'FOREIGN', 'shipping_line' => 'REGNANT ENTERPRISE CO. LTD'],
+            ['name' => 'ALEXANDER', 'vessel_type' => 'Non Containerized', 'typical_route' => 'DOMESTIC', 'shipping_line' => 'LOADSTAR SHIPPING'],
+        ];
+        if (! app()->environment('testing')) {
+            $path = database_path('seeders/data/vessels.json');
+            if (is_file($path)) {
+                $raw = preg_replace('/^\xEF\xBB\xBF/', '', (string) file_get_contents($path));
+                $loaded = json_decode($raw, true);
+                if (is_array($loaded) && $loaded !== []) {
+                    $catalog = $loaded;
+                }
+            }
+        }
+        foreach ($catalog as $row) {
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            Vessel::firstOrCreate(
+                ['organization_id' => $org->id, 'name' => $name],
+                [
+                    'vessel_type' => ($row['vessel_type'] ?? '') !== '' ? $row['vessel_type'] : null,
+                    'typical_route' => $row['typical_route'] ?? null,
+                    'shipping_line' => ($row['shipping_line'] ?? '') !== '' ? $row['shipping_line'] : null,
                     'is_active' => true,
                 ]
             );

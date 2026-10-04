@@ -558,7 +558,7 @@ class DocumentStudioService
             ],
             'bands' => [
                 'header' => [
-                    'height_mm' => 50,
+                    'height_mm' => 68,
                     'elements' => [
                         [
                             'type' => 'bound_text',
@@ -636,7 +636,7 @@ class DocumentStudioService
                             'x_mm' => 0,
                             'y_mm' => 24,
                             'width_mm' => 190,
-                            'height_mm' => 24,
+                            'height_mm' => 40,
                         ],
                         [
                             'type' => 'static_text',
@@ -694,6 +694,101 @@ class DocumentStudioService
                             'y_mm' => 38,
                             'width_mm' => 160,
                             'height_mm' => 5,
+                            'font_size_pt' => 8,
+                        ],
+                        [
+                            'type' => 'static_text',
+                            'text' => 'VESSEL:',
+                            'x_mm' => 3,
+                            'y_mm' => 46,
+                            'width_mm' => 18,
+                            'height_mm' => 4,
+                            'font_size_pt' => 7.5,
+                            'font_weight' => 'bold',
+                        ],
+                        [
+                            'type' => 'bound_text',
+                            'field' => 'shipment.vessel_name',
+                            'x_mm' => 22,
+                            'y_mm' => 46,
+                            'width_mm' => 68,
+                            'height_mm' => 4,
+                            'font_size_pt' => 8,
+                        ],
+                        [
+                            'type' => 'static_text',
+                            'text' => 'VOYAGE:',
+                            'x_mm' => 92,
+                            'y_mm' => 46,
+                            'width_mm' => 16,
+                            'height_mm' => 4,
+                            'font_size_pt' => 7.5,
+                            'font_weight' => 'bold',
+                        ],
+                        [
+                            'type' => 'bound_text',
+                            'field' => 'shipment.voyage',
+                            'x_mm' => 109,
+                            'y_mm' => 46,
+                            'width_mm' => 22,
+                            'height_mm' => 4,
+                            'font_size_pt' => 8,
+                        ],
+                        [
+                            'type' => 'static_text',
+                            'text' => 'TYPE:',
+                            'x_mm' => 133,
+                            'y_mm' => 46,
+                            'width_mm' => 12,
+                            'height_mm' => 4,
+                            'font_size_pt' => 7.5,
+                            'font_weight' => 'bold',
+                        ],
+                        [
+                            'type' => 'bound_text',
+                            'field' => 'shipment.movement',
+                            'x_mm' => 146,
+                            'y_mm' => 46,
+                            'width_mm' => 16,
+                            'height_mm' => 4,
+                            'font_size_pt' => 8,
+                        ],
+                        [
+                            'type' => 'static_text',
+                            'text' => 'ROUTE:',
+                            'x_mm' => 3,
+                            'y_mm' => 54,
+                            'width_mm' => 16,
+                            'height_mm' => 4,
+                            'font_size_pt' => 7.5,
+                            'font_weight' => 'bold',
+                        ],
+                        [
+                            'type' => 'bound_text',
+                            'field' => 'shipment.route',
+                            'x_mm' => 22,
+                            'y_mm' => 54,
+                            'width_mm' => 28,
+                            'height_mm' => 4,
+                            'font_size_pt' => 8,
+                        ],
+                        [
+                            'type' => 'static_text',
+                            'text' => 'NOTES:',
+                            'x_mm' => 54,
+                            'y_mm' => 54,
+                            'width_mm' => 14,
+                            'height_mm' => 4,
+                            'font_size_pt' => 7.5,
+                            'font_weight' => 'bold',
+                        ],
+                        [
+                            'type' => 'bound_text',
+                            'field' => 'shipment.notes',
+                            'x_mm' => 70,
+                            'y_mm' => 54,
+                            'width_mm' => 115,
+                            'height_mm' => 4,
                             'font_size_pt' => 8,
                         ],
                     ],
@@ -840,6 +935,52 @@ class DocumentStudioService
                 ]],
                 'footer' => ['height_mm' => 14, 'elements' => [
                     ['type' => 'static_text', 'text' => 'This collection receipt records verified settlement. Keep this document for your records.', 'x_mm' => 0, 'y_mm' => 2, 'width_mm' => 190, 'height_mm' => 5, 'font_size_pt' => 7.5, 'align' => 'center'],
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * Non-fiscal acknowledgement receipt layout.
+     * Settlements use the same allocation facts; the document must never be labeled Official Receipt.
+     */
+    public function getDefaultAcknowledgementReceiptLayout(): array
+    {
+        return [
+            'page' => ['paper_size' => 'LETTER', 'orientation' => 'PORTRAIT', 'margins' => ['top' => 12, 'right' => 12, 'bottom' => 12, 'left' => 12]],
+            'bands' => [
+                'header' => ['height_mm' => 52, 'elements' => [
+                    ['type' => 'bound_text', 'field' => 'issuer.registered_name', 'x_mm' => 0, 'y_mm' => 0, 'width_mm' => 120, 'height_mm' => 6, 'font_size_pt' => 11, 'font_weight' => 'bold'],
+                    ['type' => 'bound_text', 'field' => 'issuer.address', 'x_mm' => 0, 'y_mm' => 7, 'width_mm' => 120, 'height_mm' => 5, 'font_size_pt' => 8],
+                    ['type' => 'static_text', 'text' => 'ACKNOWLEDGEMENT RECEIPT', 'x_mm' => 105, 'y_mm' => 0, 'width_mm' => 85, 'height_mm' => 7, 'font_size_pt' => 11, 'font_weight' => 'bold', 'align' => 'right'],
+                    ['type' => 'static_text', 'text' => 'NOT AN OFFICIAL RECEIPT', 'x_mm' => 105, 'y_mm' => 7, 'width_mm' => 85, 'height_mm' => 5, 'font_size_pt' => 8, 'font_weight' => 'bold', 'align' => 'right'],
+                    ['type' => 'bound_text', 'field' => 'receipt.receipt_number', 'x_mm' => 125, 'y_mm' => 14, 'width_mm' => 65, 'height_mm' => 6, 'font_size_pt' => 11, 'font_weight' => 'bold', 'align' => 'right'],
+                    ['type' => 'bound_text', 'field' => 'receipt.receipt_date', 'x_mm' => 125, 'y_mm' => 21, 'width_mm' => 65, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                    ['type' => 'rectangle', 'x_mm' => 0, 'y_mm' => 29, 'width_mm' => 190, 'height_mm' => 18],
+                    ['type' => 'static_text', 'text' => 'RECEIVED FROM:', 'x_mm' => 3, 'y_mm' => 32, 'width_mm' => 35, 'height_mm' => 4, 'font_size_pt' => 7.5, 'font_weight' => 'bold'],
+                    ['type' => 'bound_text', 'field' => 'payer.registered_name', 'x_mm' => 40, 'y_mm' => 32, 'width_mm' => 145, 'height_mm' => 5, 'font_size_pt' => 8.5, 'font_weight' => 'bold'],
+                    ['type' => 'static_text', 'text' => 'TIN:', 'x_mm' => 3, 'y_mm' => 38, 'width_mm' => 15, 'height_mm' => 4, 'font_size_pt' => 7.5, 'font_weight' => 'bold'],
+                    ['type' => 'bound_text', 'field' => 'payer.tin', 'x_mm' => 20, 'y_mm' => 38, 'width_mm' => 70, 'height_mm' => 5, 'font_size_pt' => 8],
+                ]],
+                'details' => ['elements' => [[
+                    'type' => 'table', 'x_mm' => 0, 'y_mm' => 0, 'width_mm' => 190, 'height_mm' => 50,
+                    'columns' => [
+                        ['field' => 'invoice_number', 'label' => 'INVOICE', 'width_pct' => 30, 'align' => 'left'],
+                        ['field' => 'cash_applied', 'label' => 'CASH', 'width_pct' => 23, 'align' => 'right'],
+                        ['field' => 'withholding_applied', 'label' => 'WITHHOLDING', 'width_pct' => 23, 'align' => 'right'],
+                        ['field' => 'applied_amount', 'label' => 'APPLIED', 'width_pct' => 24, 'align' => 'right'],
+                    ],
+                ]]],
+                'summary' => ['height_mm' => 31, 'elements' => [
+                    ['type' => 'static_text', 'text' => 'Cash received:', 'x_mm' => 100, 'y_mm' => 0, 'width_mm' => 45, 'height_mm' => 4, 'font_size_pt' => 8, 'align' => 'right'],
+                    ['type' => 'bound_text', 'field' => 'totals.cash_received', 'x_mm' => 150, 'y_mm' => 0, 'width_mm' => 40, 'height_mm' => 4, 'font_size_pt' => 8, 'align' => 'right'],
+                    ['type' => 'static_text', 'text' => 'Approved withholding:', 'x_mm' => 100, 'y_mm' => 5, 'width_mm' => 45, 'height_mm' => 4, 'font_size_pt' => 8, 'align' => 'right'],
+                    ['type' => 'bound_text', 'field' => 'totals.withholding_received', 'x_mm' => 150, 'y_mm' => 5, 'width_mm' => 40, 'height_mm' => 4, 'font_size_pt' => 8, 'align' => 'right'],
+                    ['type' => 'static_text', 'text' => 'TOTAL APPLIED:', 'x_mm' => 95, 'y_mm' => 14, 'width_mm' => 50, 'height_mm' => 6, 'font_size_pt' => 10, 'font_weight' => 'bold', 'align' => 'right'],
+                    ['type' => 'bound_text', 'field' => 'totals.applied_amount', 'x_mm' => 150, 'y_mm' => 14, 'width_mm' => 40, 'height_mm' => 6, 'font_size_pt' => 11, 'font_weight' => 'bold', 'align' => 'right'],
+                ]],
+                'footer' => ['height_mm' => 18, 'elements' => [
+                    ['type' => 'static_text', 'text' => 'This acknowledgement receipt records internal settlement only. It is not an Official Receipt and must not be reported as a BIR fiscal OR issuance.', 'x_mm' => 0, 'y_mm' => 2, 'width_mm' => 190, 'height_mm' => 10, 'font_size_pt' => 7.5, 'align' => 'center'],
                 ]],
             ],
         ];

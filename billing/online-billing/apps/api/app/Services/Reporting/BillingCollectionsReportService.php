@@ -25,7 +25,7 @@ class BillingCollectionsReportService
     public const ROW_LIMIT = 10000;
 
     /** @var array<int, string> */
-    public const INVOICE_STATUSES = ['POSTED', 'CANCELLED'];
+    public const INVOICE_STATUSES = ['POSTED', 'SUPERSEDED', 'CANCELLED'];
 
     /** @var array<int, string> */
     public const RECEIPT_STATUSES = ['POSTED', 'REVERSED', 'VOID'];
@@ -56,7 +56,7 @@ class BillingCollectionsReportService
                 'timezone' => self::TIMEZONE,
                 'filters' => $this->publicFilters($resolved),
                 'scope_notice' => 'Only documents inside the caller organization and authorized location scope are included.',
-                'interpretation_notice' => 'Invoice issuance and posted collections are separate activity streams. Their difference for this period is not an account balance, aging result, or fiscal reconciliation.',
+                'interpretation_notice' => 'Invoice issuance and posted collections are separate activity streams. Their difference for this period is not an account balance, aging result, or fiscal reconciliation. Acknowledgement receipts appear here for internal settlement visibility but counts_as_official_receipt=false excludes them from BIR-facing Official Receipt registers.',
                 'row_limit' => self::ROW_LIMIT,
             ],
             'totals_by_currency' => $this->aggregateRows($rows),
@@ -115,7 +115,8 @@ class BillingCollectionsReportService
             'date_to' => $to->toDateString(),
             'location_id' => $locationId,
             'customer_id' => isset($filters['customer_id']) ? (int) $filters['customer_id'] : null,
-            'invoice_statuses' => $filters['invoice_statuses'] ?? ['POSTED'],
+            // Issued originals remain reportable after unpaid-invoice replacement (SUPERSEDED).
+            'invoice_statuses' => $filters['invoice_statuses'] ?? ['POSTED', 'SUPERSEDED'],
             'receipt_statuses' => $filters['receipt_statuses'] ?? ['POSTED'],
             'page' => max(1, (int) ($filters['page'] ?? 1)),
             'per_page' => min(100, max(1, (int) ($filters['per_page'] ?? 50))),
@@ -167,6 +168,8 @@ class BillingCollectionsReportService
             'document_type' => 'INVOICE',
             'document_id' => $invoice->id,
             'document_number' => $invoice->invoice_number,
+            'receipt_kind' => null,
+            'counts_as_official_receipt' => null,
             'business_date' => $invoice->business_date?->toDateString(),
             'status' => $invoice->status,
             'customer_id' => $invoice->customer_id,
@@ -188,6 +191,8 @@ class BillingCollectionsReportService
             'document_type' => 'RECEIPT',
             'document_id' => $receipt->id,
             'document_number' => $receipt->receipt_number,
+            'receipt_kind' => $receipt->receipt_kind ?? Receipt::KIND_OFFICIAL,
+            'counts_as_official_receipt' => (bool) ($receipt->counts_as_official_receipt ?? true),
             'business_date' => $receipt->business_date?->toDateString(),
             'status' => $receipt->status,
             'customer_id' => $receipt->customer_id,
@@ -240,10 +245,13 @@ class BillingCollectionsReportService
     {
         $stream = fopen('php://temp', 'r+');
         fwrite($stream, "\xEF\xBB\xBF");
-        fputcsv($stream, ['Document type', 'Business date', 'Document number', 'Status', 'Customer account', 'Customer / payer', 'Currency', 'Billed amount', 'Gross amount', 'PPA amount', 'Discount amount', 'Tax amount', 'Cash received', 'Withholding received', 'Applied amount', 'Unapplied amount'], ',', '"', '');
+        fputcsv($stream, ['Document type', 'Business date', 'Document number', 'Receipt kind', 'Counts as official receipt', 'Status', 'Customer account', 'Customer / payer', 'Currency', 'Billed amount', 'Gross amount', 'PPA amount', 'Discount amount', 'Tax amount', 'Cash received', 'Withholding received', 'Applied amount', 'Unapplied amount'], ',', '"', '');
         foreach ($rows as $row) {
             fputcsv($stream, array_map(fn ($value) => $this->safeCsvValue($value), [
-                $row['document_type'], $row['business_date'], $row['document_number'], $row['status'],
+                $row['document_type'], $row['business_date'], $row['document_number'],
+                $row['receipt_kind'] ?? '',
+                $row['counts_as_official_receipt'] === null ? '' : ($row['counts_as_official_receipt'] ? 'Y' : 'N'),
+                $row['status'],
                 $row['customer_account_number'], $row['customer_name'], $row['currency'], $row['billed_amount'],
                 $row['gross_amount'], $row['ppa_amount'], $row['discount_amount'], $row['tax_amount'],
                 $row['cash_received_amount'], $row['withholding_received_amount'], $row['applied_amount'], $row['unapplied_amount'],

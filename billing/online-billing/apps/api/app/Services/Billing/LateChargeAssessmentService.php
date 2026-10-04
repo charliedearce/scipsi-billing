@@ -6,7 +6,6 @@ use App\Exceptions\ConcurrencyException;
 use App\Models\AuditEvent;
 use App\Models\CustomerCreditAccount;
 use App\Models\CustomerCreditAccountVersion;
-use App\Models\InAppNotification;
 use App\Models\InvoiceCreditCharge;
 use App\Models\LateChargeAssessment;
 use App\Models\LateChargeBand;
@@ -15,6 +14,7 @@ use App\Models\LateChargePolicyVersion;
 use App\Models\ReceiptAllocation;
 use App\Models\User;
 use App\Models\VipCreditRepaymentSubmission;
+use App\Services\Notifications\InAppNotificationPublisher;
 use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -32,6 +32,7 @@ class LateChargeAssessmentService
 
     public function __construct(
         protected LateChargePolicyService $policies,
+        protected InAppNotificationPublisher $notifications,
     ) {}
 
     /**
@@ -423,20 +424,19 @@ class LateChargeAssessmentService
             ->where('is_active', true)
             ->pluck('user_id');
         foreach ($linkedUserIds as $userId) {
-            InAppNotification::create([
-                'organization_id' => $assessment->organization_id,
-                'user_id' => $userId,
-                'type' => 'CREDIT',
-                'title' => 'VIP Late Charge Posted',
-                'body' => 'A late charge was posted against unpaid principal. Principal aging is unchanged; fiscal document mapping remains pending accountant review.',
-                'data' => [
+            $this->notifications->publish(
+                (int) $assessment->organization_id,
+                (int) $userId,
+                'CREDIT',
+                'VIP Late Charge Posted',
+                'A late charge was posted against unpaid principal. Principal aging is unchanged; fiscal document mapping remains pending accountant review.',
+                [
                     'late_charge_assessment_id' => $assessment->id,
                     'invoice_id' => $assessment->invoice_id,
                     'assessed_amount' => (string) $assessment->assessed_amount,
                     'fiscal_mapping_status' => $assessment->fiscal_mapping_status,
                 ],
-                'is_read' => false,
-            ]);
+            );
         }
     }
 }

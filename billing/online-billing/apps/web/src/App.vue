@@ -36,3 +36,17 @@
     systemUpgrade()
   })
 </script>
+
+<style>
+  .chat-preview-notification {
+    cursor: pointer;
+    max-width: calc(100vw - 32px);
+  }
+
+  .chat-preview-notification .el-notification__content {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+</style>

@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceCreditCharge;
 use App\Models\PpaClearancePolicyVersion;
 use App\Models\PpaVerificationEvent;
+use App\Models\Receipt;
 use App\Models\ReceiptAllocation;
 use App\Models\User;
 use Carbon\Carbon;
@@ -109,8 +110,7 @@ class VipCreditAgingService
         });
     }
 
-    /** @return array<string,mixed> */
-    public function verifyForPpa(User $actor, string $invoiceNumber): array
+    public function postedInvoiceForPpa(User $actor, string $invoiceNumber): Invoice
     {
         $invoice = Invoice::where('organization_id', $actor->organization_id)
             ->where('invoice_number', $invoiceNumber)
@@ -121,8 +121,96 @@ class VipCreditAgingService
             throw new AuthorizationException('Invoice is outside your assigned PPA location scope.');
         }
 
+        return $invoice;
+    }
+
+    public function postedReceiptForPpa(User $actor, string $receiptNumber): Receipt
+    {
+        $receipt = Receipt::where('organization_id', $actor->organization_id)
+            ->where('receipt_number', $receiptNumber)
+            ->whereIn('status', ['POSTED', 'REVERSED'])
+            ->with('allocations.invoice')
+            ->firstOrFail();
+
+        if ($actor->hasRole('Administrator')) {
+            return $receipt;
+        }
+
+        $locationAllowed = $receipt->location_id !== null && $actor->canAccessLocation($receipt->location_id);
+        $invoiceAllowed = $receipt->allocations->contains(function (ReceiptAllocation $allocation) use ($actor): bool {
+            $invoice = $allocation->invoice;
+
+            return $invoice !== null
+                && $invoice->location_id !== null
+                && $actor->canAccessLocation($invoice->location_id);
+        });
+
+        if (! $locationAllowed && ! $invoiceAllowed) {
+            throw new AuthorizationException('Receipt is outside your assigned PPA location scope.');
+        }
+
+        return $receipt;
+    }
+
+    /** @return array<string,mixed> */
+    public function resolveDocumentForPpa(User $actor, string $number): array
+    {
+        $number = trim($number);
+        $invoiceExists = Invoice::where('organization_id', $actor->organization_id)
+            ->where('invoice_number', $number)
+            ->where('status', 'POSTED')
+            ->exists();
+
+        if ($invoiceExists) {
+            $invoice = $this->postedInvoiceForPpa($actor, $number);
+
+            return [
+                'document_kind' => 'INVOICE',
+                'invoice_number' => $invoice->invoice_number,
+                'receipt_number' => null,
+                'receipt_status' => null,
+                'linked_invoices' => [],
+            ];
+        }
+
+        $receipt = $this->postedReceiptForPpa($actor, $number);
+        $linked = $receipt->allocations
+            ->filter(function (ReceiptAllocation $allocation) use ($actor): bool {
+                $invoice = $allocation->invoice;
+                if ($invoice === null || $invoice->status !== 'POSTED') {
+                    return false;
+                }
+                if ($actor->hasRole('Administrator')) {
+                    return true;
+                }
+
+                return $invoice->location_id !== null && $actor->canAccessLocation($invoice->location_id);
+            })
+            ->map(fn (ReceiptAllocation $allocation): array => [
+                'invoice_number' => $allocation->invoice?->invoice_number,
+                'applied_amount' => (string) $allocation->applied_amount,
+                'currency' => $allocation->invoice?->currency,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'document_kind' => $receipt->isAcknowledgement() ? 'ACKNOWLEDGEMENT_RECEIPT' : 'OFFICIAL_RECEIPT',
+            'invoice_number' => null,
+            'receipt_number' => $receipt->receipt_number,
+            'receipt_status' => $receipt->status,
+            'linked_invoices' => $linked,
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    public function verifyForPpa(User $actor, string $invoiceNumber): array
+    {
+        $invoice = $this->postedInvoiceForPpa($actor, $invoiceNumber);
+
         $charge = InvoiceCreditCharge::where('invoice_id', $invoice->id)->first();
         $receiptSummaries = $this->currentReceiptSummaries($invoice->id);
+        $reversedSummaries = $this->reversedReceiptSummaries($invoice->id);
         $applied = $this->currentAppliedAmounts([$invoice->id])[$invoice->id] ?? '0.00';
         $outstanding = $this->positiveDifference((string) $invoice->total_charge_amount, $applied);
         $settlementStatus = bccomp($outstanding, '0.00', 2) === 0
@@ -160,6 +248,9 @@ class VipCreditAgingService
             'confirmed_receipt_count' => $receiptSummaries['count'],
             'receipt_history_truncated' => $receiptSummaries['truncated'],
             'receipts' => $receiptSummaries['items'],
+            'reversed_receipt_count' => $reversedSummaries['count'],
+            'reversed_receipt_history_truncated' => $reversedSummaries['truncated'],
+            'reversed_receipts' => $reversedSummaries['items'],
             'settlement_status' => $settlementStatus,
             'credit_status' => $creditStatus,
             'credit_due_date' => $charge?->due_date?->toDateString(),
@@ -167,7 +258,7 @@ class VipCreditAgingService
             'policy' => $policy ? ['version' => $policy->version_number, 'accept_qualifying_vip_credit' => $policy->accept_qualifying_vip_credit] : null,
             'formal_clearance_issued' => false,
             'checked_at' => $checkedAt->toIso8601String(),
-            'notice' => 'This is a read-only payment and credit validation. It does not issue a formal clearance, release or gate-pass action.',
+            'notice' => 'This is a read-only payment and credit validation. Reversed receipts are history only and never count as confirmed settlement. It does not issue a formal clearance, release or gate-pass action.',
         ];
     }
 
@@ -280,25 +371,45 @@ class VipCreditAgingService
      */
     protected function currentReceiptSummaries(int $invoiceId): array
     {
+        return $this->receiptSummariesForStatus($invoiceId, 'POSTED');
+    }
+
+    /**
+     * Reversed receipts stay visible as settlement history for PPA checks, but never
+     * contribute to applied/outstanding amounts or clearance eligibility.
+     *
+     * @return array{count:int,truncated:bool,items:array<int,array<string,string|null>>}
+     */
+    protected function reversedReceiptSummaries(int $invoiceId): array
+    {
+        return $this->receiptSummariesForStatus($invoiceId, 'REVERSED');
+    }
+
+    /**
+     * @return array{count:int,truncated:bool,items:array<int,array<string,string|null>>}
+     */
+    protected function receiptSummariesForStatus(int $invoiceId, string $status): array
+    {
         $count = ReceiptAllocation::where('invoice_id', $invoiceId)
-            ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))
+            ->whereHas('receipt', fn ($query) => $query->where('status', $status))
             ->count();
         $limit = 10;
         $items = ReceiptAllocation::query()
             ->select('receipt_allocations.*')
             ->join('receipts', 'receipts.id', '=', 'receipt_allocations.receipt_id')
             ->where('receipt_allocations.invoice_id', $invoiceId)
-            ->where('receipts.status', 'POSTED')
-            ->with('receipt:id,receipt_number,business_date')
+            ->where('receipts.status', $status)
+            ->with('receipt:id,receipt_number,business_date,status')
             ->orderByDesc('receipts.business_date')
             ->orderByDesc('receipts.id')
             ->limit($limit)
             ->get()
-            ->map(function (ReceiptAllocation $allocation): array {
+            ->map(function (ReceiptAllocation $allocation) use ($status): array {
                 return [
                     'receipt_number' => $allocation->receipt?->receipt_number,
                     'business_date' => $allocation->receipt?->business_date?->toDateString(),
                     'applied_amount' => (string) $allocation->applied_amount,
+                    'receipt_status' => $status,
                 ];
             })
             ->values()

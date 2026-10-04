@@ -84,7 +84,7 @@ class AccountStatementTest extends TestCase
 
     private function postInvoice(): Invoice
     {
-        $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', ['customer_id' => $this->customer->id, 'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]]])->assertCreated();
+        $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts', ['customer_id' => $this->customer->id, ...$this->invoiceShipmentPayload(), 'items' => [['tariff_code' => 'STEV_DOM', 'quantity' => 10]]])->assertCreated();
         $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/invoices/drafts/'.$draft->json('data.id').'/post', ['expected_version' => 1])->assertOk();
 
         return Invoice::findOrFail($draft->json('data.id'));

@@ -199,24 +199,27 @@ Module BillingAddMod
                 If frmBilladd.txtDisc.Text = "" Then
                     frmBilladd.txtDisc.Text = 0
                 End If
-                Dim a As Decimal = Decimal.Parse(frmBilladd.txtQty.Text)
-                Dim b As Decimal = Decimal.Parse(frmBilladd.txtRate.Text)
-                Dim c As Decimal = Decimal.Parse(frmBilladd.txtDisc.Text)
-                Dim formula As Decimal
-                formula = (a * b)
-                'frmBilladd.txtGross.Text = formula
-                If frmBilladd.txtRateTemp.Text <> frmBilladd.txtRate.Text Then
-                Else
-                    frmBilladd.txtGrosstemp.Text = formula
-                End If
+                Dim quantity As Decimal = Decimal.Parse(frmBilladd.txtQty.Text)
+                Dim baseRate As Decimal = Decimal.Parse(frmBilladd.txtRateTemp.Text)
+                Dim baseGross As Decimal = quantity * baseRate
+
+                'Keep this snapshot based on the tariff rate so editing quantity after a
+                'fuel-surcharge factor does not reuse a stale gross amount.
+                frmBilladd.txtGrosstemp.Text = baseGross
 
                 If frmBilladd.txtDanger.Text = "" Or frmBilladd.txtDanger.Text = 0 Then
                     frmBilladd.txtGross.Text = frmBilladd.txtGrosstemp.Text
                     frmBilladd.txtRate.Text = frmBilladd.txtRateTemp.Text
                 Else
                     If frmBilladd.radBtnFS.Checked = True Then
-                        frmBilladd.txtGross.Text = Math.Truncate(Decimal.Parse(frmBilladd.txtGrosstemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text))
-                        frmBilladd.txtRate.Text = Math.Truncate(Decimal.Parse(frmBilladd.txtRateTemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text))
+                        Dim surchargeFactor As Decimal = Decimal.Parse(frmBilladd.txtDanger.Text)
+                        Dim fuelSurchargeGross As Decimal = Math.Floor(baseGross * surchargeFactor)
+                        Dim fuelSurchargeRate As Decimal = Decimal.Round(Decimal.Parse(frmBilladd.txtRateTemp.Text) * surchargeFactor, 2, MidpointRounding.AwayFromZero)
+
+                        ' Preserve the rate's centavos (it_rate is Decimal(18,2)); drop
+                        ' the final fuel-surcharge gross fraction to a whole peso.
+                        frmBilladd.txtGross.Text = fuelSurchargeGross
+                        frmBilladd.txtRate.Text = fuelSurchargeRate
                     Else
                         frmBilladd.txtGross.Text = Decimal.Parse(frmBilladd.txtGrosstemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text)
                         frmBilladd.txtRate.Text = Decimal.Parse(frmBilladd.txtRateTemp.Text) * Decimal.Parse(frmBilladd.txtDanger.Text)

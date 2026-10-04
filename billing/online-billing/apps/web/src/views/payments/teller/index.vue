@@ -266,10 +266,11 @@
               >
                 <span
                   >#{{ current.payment_group.id }} · Deadline
-                  {{ current.payment_group.payment_deadline_at }}</span
+                  {{ formatDateTimeManila(current.payment_group.payment_deadline_at) }}</span
                 >
                 <span v-if="current.payment_group.review_due_at"
-                  >Review target {{ current.payment_group.review_due_at }}</span
+                  >Review target
+                  {{ formatDateTimeManila(current.payment_group.review_due_at) }}</span
                 >
                 <ElTag size="small" effect="plain">
                   {{
@@ -431,56 +432,131 @@
           <!-- Action Controls -->
           <div
             v-if="current.status === 'IN_REVIEW' && isAssignedToMe"
-            class="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3"
+            class="pt-3 border-t border-g-200 flex flex-col gap-3"
           >
-            <div class="flex flex-wrap items-center gap-2">
-              <ElButton type="danger" plain @click="openRejectModal">
-                <ElIcon class="mr-1"><Close /></ElIcon> Reject with Reason
-              </ElButton>
-              <ElButton
-                v-if="requiresCheckClearance"
-                type="warning"
-                plain
-                :loading="deciding"
-                @click="recordCheckClearance('CLEARED')"
-                >Record Check Cleared</ElButton
-              >
-              <ElButton
-                v-if="canMarkCheckDishonored"
-                type="danger"
-                plain
-                :loading="deciding"
-                @click="recordCheckClearance('DISHONORED')"
-                >Mark Check Dishonored</ElButton
-              >
+            <div class="flex flex-col gap-1.5">
+              <span class="text-xs font-medium text-g-600">Document to issue</span>
+              <ElRadioGroup v-model="receiptKind" size="small">
+                <ElRadioButton value="OFFICIAL">Official Receipt</ElRadioButton>
+                <ElRadioButton value="ACKNOWLEDGEMENT">Acknowledgement</ElRadioButton>
+              </ElRadioGroup>
+              <p class="text-xs text-g-500 m-0">
+                Acknowledgement still settles the bill internally. It uses a separate ACK number
+                series and is excluded from BIR-facing Official Receipt registers.
+              </p>
             </div>
-            <div class="flex items-center gap-2">
-              <span v-if="requiresCheckClearance" class="text-xs text-amber-600 dark:text-amber-400"
-                >A deposited check must be cleared before posting.</span
-              >
-              <ElButton
-                type="success"
-                size="large"
-                :loading="deciding"
-                :disabled="requiresCheckClearance"
-                class="!px-6 !font-semibold shadow-lg shadow-emerald-500/20"
-                @click="approveCurrent"
-              >
-                <ElIcon class="mr-1"><Check /></ElIcon> Approve &amp; Post Receipt
-              </ElButton>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <ElButton type="danger" plain @click="openRejectModal">
+                  <ElIcon class="mr-1"><Close /></ElIcon> Reject with Reason
+                </ElButton>
+                <ElButton
+                  v-if="requiresCheckClearance"
+                  type="warning"
+                  plain
+                  :loading="deciding"
+                  @click="recordCheckClearance('CLEARED')"
+                  >Record Check Cleared</ElButton
+                >
+                <ElButton
+                  v-if="canMarkCheckDishonored"
+                  type="danger"
+                  plain
+                  :loading="deciding"
+                  @click="recordCheckClearance('DISHONORED')"
+                  >Mark Check Dishonored</ElButton
+                >
+              </div>
+              <div class="flex items-center gap-2">
+                <span
+                  v-if="requiresCheckClearance"
+                  class="text-xs text-amber-600 dark:text-amber-400"
+                  >A deposited check must be cleared before posting.</span
+                >
+                <ElButton
+                  type="success"
+                  size="large"
+                  :loading="deciding"
+                  :disabled="requiresCheckClearance"
+                  class="!px-6 !font-semibold shadow-lg shadow-emerald-500/20"
+                  @click="approveCurrent"
+                >
+                  <ElIcon class="mr-1"><Check /></ElIcon>
+                  {{
+                    receiptKind === 'ACKNOWLEDGEMENT'
+                      ? 'Approve & Post Acknowledgement'
+                      : 'Approve & Post Official Receipt'
+                  }}
+                </ElButton>
+              </div>
             </div>
+          </div>
+          <div
+            v-else-if="current.status === 'SUBMITTED'"
+            class="pt-3 border-t border-g-200 flex flex-wrap items-center justify-between gap-3"
+          >
+            <ElAlert
+              type="warning"
+              :closable="false"
+              show-icon
+              class="flex-1 !m-0"
+              title="Waiting in the fair queue"
+              description="Approve and Reject appear after you claim this proof. Use Claim Oldest Proof to take the next waiting item."
+            />
+            <ElButton type="primary" :loading="claiming" @click="claimNext">
+              <ElIcon class="mr-1"><Select /></ElIcon> Claim Oldest Proof
+            </ElButton>
           </div>
           <ElAlert
             v-else
             type="info"
             :closable="false"
             show-icon
-            :title="
-              current.status === 'IN_REVIEW'
-                ? 'Claimed by another teller. Only the assigned teller may approve or reject.'
-                : 'This proof submission has already been resolved or closed.'
-            "
+            :title="actionBlockedTitle"
+            :description="actionBlockedDescription"
           />
+
+          <div
+            v-if="current.receipt"
+            class="pt-3 border-t border-g-200 flex flex-wrap items-center justify-between gap-3"
+          >
+            <div class="flex items-center gap-2 text-sm text-g-700">
+              <ElTag
+                :type="current.receipt.receipt_kind === 'ACKNOWLEDGEMENT' ? 'warning' : 'success'"
+                size="small"
+              >
+                {{
+                  current.receipt.receipt_kind === 'ACKNOWLEDGEMENT'
+                    ? 'Acknowledgement'
+                    : 'Official Receipt'
+                }}
+              </ElTag>
+              <span class="font-mono font-medium">#{{ current.receipt.receipt_number }}</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <ElButton
+                v-if="receiptPdfReady(current.receipt)"
+                :type="current.receipt.receipt_kind === 'ACKNOWLEDGEMENT' ? 'warning' : 'success'"
+                plain
+                @click="viewReceiptPdf(current.receipt)"
+              >
+                <ElIcon class="mr-1"><View /></ElIcon>
+                {{
+                  current.receipt.receipt_kind === 'ACKNOWLEDGEMENT'
+                    ? 'View / Download ACK'
+                    : 'View / Download OR'
+                }}
+              </ElButton>
+              <ElTag v-else type="info" effect="plain" size="small">
+                {{
+                  current.receipt.receipt_kind === 'ACKNOWLEDGEMENT'
+                    ? 'ACK PDF not ready'
+                    : 'OR PDF not ready'
+                }}
+              </ElTag>
+              <ElButton plain @click="openReceiptChat(current.receipt.id)">Chat</ElButton>
+            </div>
+          </div>
         </div>
       </ElCard>
     </div>
@@ -558,6 +634,12 @@
       :file-id="current?.proof_file_id"
       :fetcher="proofFetcher"
     />
+
+    <ProofViewerModal
+      v-model="receiptPdfVisible"
+      :title="activeReceiptTitle"
+      :fetcher="receiptPdfFetcher"
+    />
   </div>
 </template>
 
@@ -580,6 +662,7 @@
   import {
     approvePaymentSubmission,
     claimNextPaymentSubmission,
+    downloadPortalReceiptPdf,
     fetchTellerPaymentSubmission,
     fetchTellerPaymentSubmissions,
     recordPaymentCheckClearance,
@@ -588,8 +671,12 @@
   } from '@/api/payments'
   import { downloadPrivateFile } from '@/api/documentRequirements'
   import { fetchAdminWithholding, type WithholdingCertificate } from '@/api/taxEvidence'
+  import { fetchGetUserInfo } from '@/api/auth'
   import { planWithholding, usableWithholdingCertificates } from '@/utils/billing/withholdingPlan'
+  import { formatDateTimeManila } from '@/utils/date/formatDateTime'
+  import { useAuthoritativeRealtimeRefresh } from '@/composables/useAuthoritativeRealtimeRefresh'
   import { useUserStore } from '@/store/modules/user'
+  import { mittBus } from '@/utils/sys'
 
   defineOptions({ name: 'TellerPaymentProofReview' })
 
@@ -615,12 +702,21 @@
   const selectedCertificateId = ref<number | 'auto' | null>(null)
   const cashEdits = ref<Record<number, string>>({})
   const confirmedReference = ref('')
+  const receiptKind = ref<'OFFICIAL' | 'ACKNOWLEDGEMENT'>('OFFICIAL')
   const queueFilter = ref<'all' | 'mine'>('all')
 
   // Modals
   const proofModalVisible = ref(false)
+  const receiptPdfVisible = ref(false)
+  const activeReceiptId = ref<number | null>(null)
+  const activeReceiptNumber = ref('')
   const rejectDialogVisible = ref(false)
   const rejectionReason = ref('')
+  const realtime = useAuthoritativeRealtimeRefresh({
+    scope: 'payments',
+    refresh: () => loadQueue(),
+    isBusy: () => claiming.value || deciding.value || loadingDetail.value
+  })
 
   const quickRejectChips = [
     'Deposit slip image is blurry or cut off',
@@ -630,9 +726,37 @@
     'Withholding Certificate (BIR 2307) missing or expired'
   ]
 
-  const isAssignedToMe = computed(
-    () => Number(current.value?.assigned_to_user_id) === Number(userStore.info?.userId)
+  const currentUserId = computed(() =>
+    Number((userStore.info as any)?.userId || (userStore.info as any)?.id || 0)
   )
+
+  const isAssignedToMe = computed(
+    () =>
+      currentUserId.value > 0 && Number(current.value?.assigned_to_user_id) === currentUserId.value
+  )
+
+  const actionBlockedTitle = computed(() => {
+    if (current.value?.status === 'IN_REVIEW' && !isAssignedToMe.value) {
+      const other = current.value?.assigned_teller?.name
+      return other
+        ? `Claimed by ${other}. Only that teller may approve or reject.`
+        : 'Claimed by another teller. Only the assigned teller may approve or reject.'
+    }
+    if (current.value?.status === 'APPROVED') {
+      return 'This proof was approved and an official receipt was posted.'
+    }
+    if (current.value?.status === 'REJECTED') {
+      return 'This proof was rejected and returned to the customer for correction.'
+    }
+    return 'This proof submission has already been resolved or closed.'
+  })
+
+  const actionBlockedDescription = computed(() => {
+    if (current.value?.status === 'IN_REVIEW' && !isAssignedToMe.value) {
+      return 'Open My Claim filter or claim the next waiting proof to get Approve / Reject actions.'
+    }
+    return undefined
+  })
 
   const requiresCheckClearance = computed(
     () =>
@@ -647,9 +771,7 @@
   )
 
   const myClaimedSubmissions = computed(() =>
-    queue.value.filter(
-      (item) => Number(item.assigned_to_user_id) === Number(userStore.info?.userId)
-    )
+    queue.value.filter((item) => Number(item.assigned_to_user_id) === currentUserId.value)
   )
 
   const filteredQueue = computed(() => {
@@ -808,23 +930,83 @@
     return { blob, filename: `proof-${current.value.id}` }
   }
 
+  const activeReceiptKind = ref<'OFFICIAL' | 'ACKNOWLEDGEMENT'>('OFFICIAL')
+
+  const activeReceiptTitle = computed(() => {
+    const label =
+      activeReceiptKind.value === 'ACKNOWLEDGEMENT' ? 'Acknowledgement Receipt' : 'Official Receipt'
+    return activeReceiptNumber.value ? `${label} · ${activeReceiptNumber.value}` : `${label} PDF`
+  })
+
+  function receiptPdfReady(
+    receipt?: {
+      canonical_artifact?: { id?: number; status?: string } | null
+    } | null
+  ): boolean {
+    const status = receipt?.canonical_artifact?.status
+    return Boolean(
+      receipt?.canonical_artifact?.id && (!status || status === 'RENDERED' || status === 'FAILED')
+    )
+  }
+
+  function viewReceiptPdf(receipt: {
+    id: number
+    receipt_number?: string | null
+    receipt_kind?: string | null
+  }) {
+    if (!receipt?.id) return
+    activeReceiptId.value = receipt.id
+    activeReceiptNumber.value = receipt.receipt_number || String(receipt.id)
+    activeReceiptKind.value =
+      receipt.receipt_kind === 'ACKNOWLEDGEMENT' ? 'ACKNOWLEDGEMENT' : 'OFFICIAL'
+    receiptPdfVisible.value = true
+  }
+
+  function openReceiptChat(receiptId: number) {
+    if (!receiptId) return
+    mittBus.emit('openChat', { receiptId })
+  }
+
+  const receiptPdfFetcher = async () => {
+    if (!activeReceiptId.value) {
+      throw new Error('No receipt selected.')
+    }
+    const blob = await downloadPortalReceiptPdf(activeReceiptId.value)
+    const name = activeReceiptNumber.value || String(activeReceiptId.value)
+    const prefix = activeReceiptKind.value === 'ACKNOWLEDGEMENT' ? 'ACK' : 'OR'
+    return { blob, filename: `${prefix}-${name}.pdf` }
+  }
+
   async function approveCurrent() {
     if (!current.value) return
+    const isAck = receiptKind.value === 'ACKNOWLEDGEMENT'
     try {
       await ElMessageBox.confirm(
-        'This will atomically post an official collection receipt using the confirmed amounts. Continue only after bank verification.',
-        'Approve Payment Proof',
-        { type: 'warning', confirmButtonText: 'Confirm & Post Receipt' }
+        isAck
+          ? 'This posts an acknowledgement receipt: settlement and allocations are recorded internally, but the document is not an Official Receipt and is excluded from BIR-facing OR registers. Continue only after bank verification.'
+          : 'This will atomically post an official collection receipt using the confirmed amounts. Continue only after bank verification.',
+        isAck ? 'Approve & Post Acknowledgement' : 'Approve Payment Proof',
+        {
+          type: 'warning',
+          confirmButtonText: isAck
+            ? 'Confirm & Post Acknowledgement'
+            : 'Confirm & Post Official Receipt'
+        }
       )
       deciding.value = true
       const updated = await approvePaymentSubmission(current.value.id, {
         expected_version: current.value.lock_version,
         confirmed_reference: confirmedReference.value || undefined,
+        receipt_kind: receiptKind.value,
         allocations: reviewAllocations()
       })
+      const postedKind = updated.receipt?.receipt_kind || receiptKind.value
       ElMessage.success(
-        `Proof approved. Official Collection Receipt #${updated.receipt?.receipt_number || ''} was posted.`
+        postedKind === 'ACKNOWLEDGEMENT'
+          ? `Proof approved. Acknowledgement #${updated.receipt?.receipt_number || ''} was posted (not an Official Receipt).`
+          : `Proof approved. Official Collection Receipt #${updated.receipt?.receipt_number || ''} was posted.`
       )
+      receiptKind.value = 'OFFICIAL'
       await loadQueue()
       current.value = updated
     } catch (error: any) {
@@ -899,7 +1081,15 @@
     }
   }
 
-  onMounted(loadQueue)
+  onMounted(async () => {
+    const me = await fetchGetUserInfo()
+    userStore.setUserInfo(me as any)
+    realtime.startForOrganization(
+      Number((me as any).organization?.id || (me as any).organization_id)
+    )
+    realtime.startForUser(Number((me as any).id || (me as any).userId))
+    await loadQueue()
+  })
 </script>
 
 <style scoped>

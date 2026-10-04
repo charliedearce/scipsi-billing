@@ -1,4 +1,5 @@
 import request from '@/utils/http'
+import type { BillingRequestProgress } from '@/api/billingRequests'
 
 export interface PortalBill {
   id: number
@@ -10,11 +11,86 @@ export interface PortalBill {
   outstanding_amount: string
   lock_version: number
   status: 'POSTED'
+  billing_request_id?: number | null
+  transaction_no?: string | null
+  catering_teller?: { id: number; name: string } | null
+  timeline?: {
+    requested_at?: string | null
+    bill_approved_at?: string | null
+    paid_at?: string | null
+  }
   receipt_history: Array<{
     receipt_id: number
     receipt_number: string
+    receipt_kind?: 'OFFICIAL' | 'ACKNOWLEDGEMENT'
+    counts_as_official_receipt?: boolean
     business_date: string
+    posted_at?: string | null
     applied_amount: string
+    pdf_available?: boolean
+  }>
+}
+
+export interface PortalBillDetail extends PortalBill {
+  posted_at?: string | null
+  request_progress?: BillingRequestProgress | null
+  notes?: string | null
+  shipment?: {
+    vessel_name?: string | null
+    voyage?: string | null
+    movement_type?: 'IN' | 'OUT' | '' | null
+    route_type?: 'DOMESTIC' | 'FOREIGN' | '' | null
+  }
+  buyer: {
+    name?: string | null
+    trade_name?: string | null
+    tin?: string | null
+    branch_code?: string | null
+    tax_classification?: string | null
+    address?: Record<string, unknown> | string | null
+    email?: string | null
+    phone?: string | null
+  }
+  amounts: {
+    base_gross_amount: string
+    fuel_surcharge_amount: string
+    gross_amount: string
+    ppa_amount: string
+    discount_amount: string
+    net_amount: string
+    tax_amount: string
+    total_charge_amount: string
+    applied_amount: string
+    outstanding_amount: string
+  }
+  items: Array<{
+    line_number: number
+    description?: string | null
+    tariff_code?: string | null
+    quantity: string
+    unit_rate: string
+    base_gross_amount: string
+    fuel_surcharge_amount: string
+    gross_amount: string
+    ppa_amount: string
+    discount_amount: string
+    net_amount: string
+    tax_amount: string
+    total_charge_amount: string
+    tax_treatment?: string | null
+  }>
+  pdf_available: boolean
+  source_attachments?: Array<{
+    billing_request_id: number
+    transaction_no?: string | null
+    document_id: number
+    document_type_name?: string | null
+    private_file_id: number
+    original_name?: string | null
+    mime_type?: string | null
+    scan_status?: string | null
+    review_status?: string | null
+    version_number?: number | null
   }>
 }
 
@@ -47,9 +123,11 @@ export interface ManualPaymentSubmission {
   receipt?: {
     id: number
     receipt_number: string
+    receipt_kind?: 'OFFICIAL' | 'ACKNOWLEDGEMENT'
+    counts_as_official_receipt?: boolean
     status: string
     applied_amount: string
-    canonical_artifact?: { id: number } | null
+    canonical_artifact?: { id: number; status?: string } | null
   } | null
   payment_group?: PaymentGroup | null
 }
@@ -153,6 +231,29 @@ export function fetchPortalBills(customerId: number) {
   })
 }
 
+export function fetchPortalBillDetail(customerId: number, invoiceId: number) {
+  return request.get<PortalBillDetail>({
+    url: `/api/v1/portal/bills/${invoiceId}`,
+    params: { customer_id: customerId }
+  })
+}
+
+export function downloadPortalBillPdf(invoiceId: number) {
+  return request.get<Blob>({
+    url: `/api/v1/invoices/${invoiceId}/artifacts/download`,
+    responseType: 'blob',
+    showErrorMessage: false
+  })
+}
+
+export function downloadPortalReceiptPdf(receiptId: number) {
+  return request.get<Blob>({
+    url: `/api/v1/receipts/${receiptId}/artifacts/download`,
+    responseType: 'blob',
+    showErrorMessage: false
+  })
+}
+
 export function fetchPaymentSubmissions(customerId: number) {
   return request.get<{ data: ManualPaymentSubmission[]; total: number }>({
     url: '/api/v1/portal/payment-submissions',
@@ -222,6 +323,7 @@ export function approvePaymentSubmission(
   data: {
     expected_version: number
     confirmed_reference?: string
+    receipt_kind?: 'OFFICIAL' | 'ACKNOWLEDGEMENT'
     allocations: Array<{
       invoice_id: number
       cash_amount: string

@@ -10,6 +10,7 @@ The application is a VB.NET WinForms executable targeting .NET Framework 4.5. It
 - [Architecture and workflows](docs/ARCHITECTURE.md) — runtime structure, entry points, and document lifecycles.
 - [Database contracts](docs/DATABASE.md) — code-inferred tables, relationships, statuses, and stored procedures.
 - [Development and validation](docs/DEVELOPMENT.md) — setup, build commands, safe change process, and known risks.
+- [Online billing project and planning](online-billing/README.md) — Vue, Laravel, and PostgreSQL project folder, target architecture, delivery gates, and decisions pending validation. This is a plan, not an implemented web application.
 
 ## Repository layout
 
@@ -37,3 +38,5 @@ The application is a VB.NET WinForms executable targeting .NET Framework 4.5. It
 Administrators can open **Settings > OR Print Designer** to move, resize, format, add, or remove data-bound Official Receipt fields. The active DevExpress `.repx` template is stored under the current user's local application-data directory by default; see [Development and validation](docs/DEVELOPMENT.md#official-receipt-template) for deployment and shared-template configuration.
 
 The same Settings menu contains **Service Print Designer** for service bills that do not use the PPA bill form. Its layout is stored independently, so OR and service-billing changes cannot overwrite each other.
+
+**NSCL Service Print Designer** maintains a second service-billing layout with the same `Bill` and `Items` fields. Printing automatically selects it when any saved invoice item has a cargo code beginning with `NSCL`; otherwise the existing normal-service/PPA routing remains in effect.

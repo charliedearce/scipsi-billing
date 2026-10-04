@@ -10,6 +10,7 @@ Imports DevExpress.XtraReports.UI
 
 Public NotInheritable Class ServicePrintTemplateService
     Private Const TemplateFileName As String = "ServiceBilling.repx"
+    Private Const NsclTemplateFileName As String = "ServiceBillingNSCL.repx"
     Private Const TemplateDirectoryName As String = "SCIPSI Billing\Templates"
 
     Private Sub New()
@@ -26,29 +27,72 @@ Public NotInheritable Class ServicePrintTemplateService
         End Get
     End Property
 
+    Public Shared ReadOnly Property NsclTemplatePath As String
+        Get
+            Dim configuredPath As String = ConfigurationManager.AppSettings("ServiceNsclPrintTemplatePath")
+            If Not String.IsNullOrWhiteSpace(configuredPath) Then
+                Return Environment.ExpandEnvironmentVariables(configuredPath)
+            End If
+
+            Return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), TemplateDirectoryName, NsclTemplateFileName)
+        End Get
+    End Property
+
     Public Shared Sub DesignTemplate(ByVal owner As IWin32Window)
+        DesignTemplate(owner, False)
+    End Sub
+
+    Public Shared Sub DesignNsclTemplate(ByVal owner As IWin32Window)
+        DesignTemplate(owner, True)
+    End Sub
+
+    Private Shared Sub DesignTemplate(ByVal owner As IWin32Window, ByVal useNsclTemplate As Boolean)
+        Dim designerTitle As String = If(useNsclTemplate, "NSCL Service Print Designer", "Service Print Designer")
+        Dim templateDescription As String = If(useNsclTemplate, "NSCL Service Billing", "Service Billing")
+        Dim activeTemplatePath As String = GetTemplatePath(useNsclTemplate)
+
         Try
-            Using data As DataSet = ServicePrintDataProvider.CreateSampleData()
-                Using report As XtraReport = CreateBoundReport(data, True)
+            Using data As DataSet = If(useNsclTemplate,
+                                       ServicePrintDataProvider.CreateNsclSampleData(),
+                                       ServicePrintDataProvider.CreateSampleData())
+                Using report As XtraReport = CreateBoundReport(data, True, useNsclTemplate)
                     Using designTool As New ReportDesignTool(report)
                         designTool.ShowDesignerDialog()
                     End Using
 
                     If MessageBox.Show(owner,
-                                       "Save this layout as the active Service Billing template?" & Environment.NewLine & Environment.NewLine & TemplatePath,
-                                       "Service Print Designer",
+                                       "Save this layout as the active " & templateDescription & " template?" & Environment.NewLine & Environment.NewLine & activeTemplatePath,
+                                       designerTitle,
                                        MessageBoxButtons.YesNo,
                                        MessageBoxIcon.Question) = DialogResult.Yes Then
-                        SaveTemplate(report)
-                        MessageBox.Show(owner, "Service Billing template saved.", "Service Print Designer", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                        SaveTemplate(report, useNsclTemplate)
+                        MessageBox.Show(owner, templateDescription & " template saved.", designerTitle, MessageBoxButtons.OK, MessageBoxIcon.Information)
                     End If
                 End Using
             End Using
         Catch ex As Exception
-            MessageBox.Show(owner, "Unable to open or save the Service Billing template designer." & Environment.NewLine & ex.Message,
-                            "Service Print Designer", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            MessageBox.Show(owner, "Unable to open or save the " & templateDescription & " template designer." & Environment.NewLine & ex.Message,
+                            designerTitle, MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
+
+    Public Shared Function IsNsclBill(ByVal billNumber As String) As Boolean
+        If String.IsNullOrWhiteSpace(billNumber) Then
+            Return False
+        End If
+
+        Using connection As New SqlConnection(ConfigurationManager.ConnectionStrings("ConString").ConnectionString)
+            Using command As New SqlCommand("SELECT CASE WHEN EXISTS (" &
+                                            "SELECT 1 FROM tbl_item_trans " &
+                                            "WHERE it_bill_num = @bill_num " &
+                                            "AND UPPER(LTRIM(RTRIM(ISNULL(it_ccode, '')))) LIKE 'NSCL%') " &
+                                            "THEN 1 ELSE 0 END", connection)
+                command.Parameters.Add("@bill_num", SqlDbType.VarChar, 20).Value = billNumber
+                connection.Open()
+                Return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) = 1
+            End Using
+        End Using
+    End Function
 
     Public Shared Function PrintBill(ByVal billNumber As String, ByVal owner As IWin32Window) As Boolean
         If String.IsNullOrWhiteSpace(billNumber) Then
@@ -58,7 +102,8 @@ Public NotInheritable Class ServicePrintTemplateService
 
         Try
             Using data As DataSet = ServicePrintDataProvider.LoadBill(billNumber)
-                Using report As XtraReport = CreateBoundReport(data, True)
+                Dim useNsclTemplate As Boolean = ServicePrintDataProvider.ContainsNsclItem(data)
+                Using report As XtraReport = CreateBoundReport(data, True, useNsclTemplate)
                     Using printTool As New ReportPrintTool(report)
                         Dim printRequested As Boolean
                         If DirectPrintingEnabled() Then
@@ -84,18 +129,29 @@ Public NotInheritable Class ServicePrintTemplateService
         End Try
     End Function
 
-    Private Shared Function CreateBoundReport(ByVal data As DataSet, ByVal warnOnInvalidTemplate As Boolean) As XtraReport
+    Private Shared Function CreateBoundReport(ByVal data As DataSet, ByVal warnOnInvalidTemplate As Boolean,
+                                              ByVal useNsclTemplate As Boolean) As XtraReport
         Dim report As XtraReport = ServicePrintReportFactory.CreateDefaultReport()
+        Dim activeTemplatePath As String = GetTemplatePath(useNsclTemplate)
+        Dim designerTitle As String = If(useNsclTemplate, "NSCL Service Print Designer", "Service Print Designer")
+        If useNsclTemplate Then
+            report.Name = "ServiceBillingNSCL"
+            report.DisplayName = "NSCL Service Billing"
+        End If
 
-        If File.Exists(TemplatePath) Then
+        If File.Exists(activeTemplatePath) Then
             Try
-                report.LoadLayout(TemplatePath)
+                report.LoadLayout(activeTemplatePath)
             Catch ex As Exception
                 report.Dispose()
                 report = ServicePrintReportFactory.CreateDefaultReport()
+                If useNsclTemplate Then
+                    report.Name = "ServiceBillingNSCL"
+                    report.DisplayName = "NSCL Service Billing"
+                End If
                 If warnOnInvalidTemplate Then
-                    MessageBox.Show("The saved Service Billing template could not be loaded. The default layout will be opened instead." & Environment.NewLine & ex.Message,
-                                    "Service Print Designer", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    MessageBox.Show("The saved " & report.DisplayName & " template could not be loaded. The default layout will be opened instead." & Environment.NewLine & ex.Message,
+                                    designerTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning)
                 End If
             End Try
         End If
@@ -128,22 +184,28 @@ Public NotInheritable Class ServicePrintTemplateService
         Next
     End Sub
 
-    Private Shared Sub SaveTemplate(ByVal report As XtraReport)
-        Dim directoryPath As String = Path.GetDirectoryName(TemplatePath)
+    Private Shared Function GetTemplatePath(ByVal useNsclTemplate As Boolean) As String
+        Return If(useNsclTemplate, NsclTemplatePath, TemplatePath)
+    End Function
+
+    Private Shared Sub SaveTemplate(ByVal report As XtraReport, ByVal useNsclTemplate As Boolean)
+        Dim activeTemplatePath As String = GetTemplatePath(useNsclTemplate)
+        Dim directoryPath As String = Path.GetDirectoryName(activeTemplatePath)
         If String.IsNullOrWhiteSpace(directoryPath) Then
             Throw New InvalidOperationException("The Service Billing template path must include a directory.")
         End If
 
         Directory.CreateDirectory(directoryPath)
-        If File.Exists(TemplatePath) Then
+        If File.Exists(activeTemplatePath) Then
+            Dim backupPrefix As String = If(useNsclTemplate, "ServiceBillingNSCL-", "ServiceBilling-")
             Dim backupPath As String = Path.Combine(directoryPath,
-                                                    "ServiceBilling-" & DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) & ".repx.backup")
-            File.Copy(TemplatePath, backupPath, False)
+                                                    backupPrefix & DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) & ".repx.backup")
+            File.Copy(activeTemplatePath, backupPath, False)
         End If
 
         report.ScriptsSource = String.Empty
         report.DataSource = Nothing
-        report.SaveLayout(TemplatePath)
+        report.SaveLayout(activeTemplatePath)
     End Sub
 
     Private Shared Function DirectPrintingEnabled() As Boolean
@@ -291,6 +353,31 @@ Friend NotInheritable Class ServicePrintDataProvider
         AddSampleItem(data.Tables("Items"), "0000001234", 1D, "UNIT", "STORAGE SERVICE", "CARGO-02", 520D)
         SetLineText(data)
         Return data
+    End Function
+
+    Public Shared Function CreateNsclSampleData() As DataSet
+        Dim data As DataSet = CreateSampleData()
+        Dim firstItem As DataRow = data.Tables("Items").Rows(0)
+        firstItem("ServiceName") = "NSCL SCALE SERVICE"
+        firstItem("CargoCode") = "NSCL1"
+        firstItem("CargoDescription") = "Sample NSCL scale transaction"
+        SetLineText(data)
+        Return data
+    End Function
+
+    Public Shared Function ContainsNsclItem(ByVal data As DataSet) As Boolean
+        If data Is Nothing OrElse Not data.Tables.Contains("Items") Then
+            Return False
+        End If
+
+        For Each row As DataRow In data.Tables("Items").Rows
+            Dim cargoCode As String = Convert.ToString(row("CargoCode"), CultureInfo.InvariantCulture).Trim()
+            If cargoCode.StartsWith("NSCL", StringComparison.OrdinalIgnoreCase) Then
+                Return True
+            End If
+        Next
+
+        Return False
     End Function
 
     Private Shared Sub AddSampleItem(ByVal table As DataTable, ByVal billNumber As String, ByVal quantity As Decimal,
