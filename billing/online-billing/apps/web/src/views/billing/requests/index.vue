@@ -227,6 +227,12 @@
                 }}
               </ElButton>
             </ElUpload>
+            <PhotoToPdfPicker
+              :allowed-mime-types="req.document_type?.allowed_mime_types"
+              :max-file-size-kb="req.document_type?.max_file_size_kb"
+              :disabled="saving || !canAddPending(req)"
+              @created="(file) => onCreateFileChosen({ raw: file } as UploadFile, req)"
+            />
             <ul v-if="pendingCount(req.document_type_id)" class="space-y-1 text-xs text-slate-600">
               <li
                 v-for="(file, idx) in pendingFiles[req.document_type_id]"
@@ -508,6 +514,12 @@
                 }}
               </ElButton>
             </ElUpload>
+            <PhotoToPdfPicker
+              :allowed-mime-types="req.document_type?.allowed_mime_types"
+              :max-file-size-kb="req.document_type?.max_file_size_kb"
+              :disabled="uploading || (!canAddAttached(req) && !replaceTargetId)"
+              @created="(file) => onFileChosen({ raw: file } as UploadFile, req)"
+            />
             <p v-if="replaceTargetId" class="text-xs text-amber-700">
               Replacing selected file.
               <ElButton link type="info" size="small" @click="replaceTargetId = null"
@@ -661,6 +673,7 @@
   import BillingRequestProgress from '@/components/business/BillingRequestProgress.vue'
   import ProofViewerModal from '@/components/business/ProofViewerModal.vue'
   import PrivateFileThumbnail from '@/components/business/PrivateFileThumbnail.vue'
+  import PhotoToPdfPicker from '@/components/business/PhotoToPdfPicker.vue'
   import {
     acceptFromMimeTypes,
     formatMaxUploadSize,

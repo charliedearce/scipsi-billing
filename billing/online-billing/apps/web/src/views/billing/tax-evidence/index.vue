@@ -286,6 +286,12 @@
           >
             <ElButton>Choose file</ElButton>
           </ElUpload>
+          <PhotoToPdfPicker
+            :allowed-mime-types="withholdingDocType?.allowed_mime_types"
+            :max-file-size-kb="withholdingDocType?.max_file_size_kb"
+            @created="(file) => (withholdingFile = file)"
+          />
+          <p v-if="withholdingFile" class="text-xs text-g-600">Selected: {{ withholdingFile.name }}</p>
           <p class="mt-1 text-xs text-slate-500">
             {{ withholdingDocType?.name || 'BIR 2307 document type' }} · max
             {{ formatMaxUploadSize(withholdingDocType?.max_file_size_kb) }}
@@ -375,6 +381,12 @@
           >
             <ElButton>Choose file</ElButton>
           </ElUpload>
+          <PhotoToPdfPicker
+            :allowed-mime-types="exemptionDocType?.allowed_mime_types"
+            :max-file-size-kb="exemptionDocType?.max_file_size_kb"
+            @created="(file) => (exemptionFile = file)"
+          />
+          <p v-if="exemptionFile" class="text-xs text-g-600">Selected: {{ exemptionFile.name }}</p>
           <p class="mt-1 text-xs text-slate-500">
             {{ exemptionDocType?.name || 'Exemption document type' }} · max
             {{ formatMaxUploadSize(exemptionDocType?.max_file_size_kb) }}
@@ -418,6 +430,7 @@
   import { ElMessage, type UploadFile } from 'element-plus'
   import { View } from '@element-plus/icons-vue'
   import DocumentPreviewPane from '@/components/business/DocumentPreviewPane.vue'
+  import PhotoToPdfPicker from '@/components/business/PhotoToPdfPicker.vue'
   import {
     downloadPrivateFile,
     fetchDocumentTypes,

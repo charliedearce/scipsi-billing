@@ -12,6 +12,7 @@
     <RouterView></RouterView>
     <!-- PWA: update available banner (W33) — user-triggered reload only -->
     <PwaUpdateBanner />
+    <PwaInstallPrompt />
   </ElConfigProvider>
 </template>
 
@@ -23,6 +24,7 @@
   import { initializeTheme } from './hooks/core/useTheme'
   // PWA components (P1-11 / W33)
   import PwaUpdateBanner from './components/pwa/PwaUpdateBanner.vue'
+  import PwaInstallPrompt from './components/pwa/PwaInstallPrompt.vue'
   import OfflineIndicator from './components/pwa/OfflineIndicator.vue'
 
   onBeforeMount(() => {

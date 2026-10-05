@@ -460,6 +460,12 @@
             >Drop the bank receipt here or click to choose a file.</div
           ></ElUpload
         >
+        <PhotoToPdfPicker
+          :allowed-mime-types="proofType?.allowed_mime_types"
+          :max-file-size-kb="proofType?.max_file_size_kb"
+          @created="(file) => (proofFile = file)"
+        />
+        <p v-if="proofFile" class="text-xs text-g-600">Selected: {{ proofFile.name }}</p>
       </div>
       <template #footer
         ><ElButton @click="repaymentDialog = false">Cancel</ElButton
@@ -504,6 +510,12 @@
           >Drop the corrected bank receipt here or click to choose a file.</div
         ></ElUpload
       >
+      <PhotoToPdfPicker
+        :allowed-mime-types="proofType?.allowed_mime_types"
+        :max-file-size-kb="proofType?.max_file_size_kb"
+        @created="(file) => (proofFile = file)"
+      />
+      <p v-if="proofFile" class="text-xs text-g-600">Selected: {{ proofFile.name }}</p>
       <template #footer
         ><ElButton @click="resubmitDialog = false">Cancel</ElButton
         ><ElButton
@@ -541,6 +553,7 @@
   import { useAuthoritativeRealtimeRefresh } from '@/composables/useAuthoritativeRealtimeRefresh'
   import MetricCard from '@/components/business/MetricCard.vue'
   import ProofViewerModal from '@/components/business/ProofViewerModal.vue'
+  import PhotoToPdfPicker from '@/components/business/PhotoToPdfPicker.vue'
   import { downloadPortalReceiptPdf, fetchPortalBills, type PortalBill } from '@/api/payments'
   import {
     downloadPrivateFile,

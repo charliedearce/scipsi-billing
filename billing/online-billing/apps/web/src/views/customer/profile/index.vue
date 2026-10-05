@@ -312,6 +312,12 @@
           >
             <ElButton>Choose file</ElButton>
           </ElUpload>
+          <PhotoToPdfPicker
+            :allowed-mime-types="withholdingDocType?.allowed_mime_types"
+            :max-file-size-kb="withholdingDocType?.max_file_size_kb"
+            @created="(file) => (withholdingFile = file)"
+          />
+          <p v-if="withholdingFile" class="text-xs text-g-600">Selected: {{ withholdingFile.name }}</p>
         </ElFormItem>
         <ElFormItem label="Notes for Admin">
           <ElInput v-model="withholdingForm.customer_notes" type="textarea" :rows="2" />
@@ -371,6 +377,12 @@
           >
             <ElButton>Choose file</ElButton>
           </ElUpload>
+          <PhotoToPdfPicker
+            :allowed-mime-types="exemptionDocType?.allowed_mime_types"
+            :max-file-size-kb="exemptionDocType?.max_file_size_kb"
+            @created="(file) => (exemptionFile = file)"
+          />
+          <p v-if="exemptionFile" class="text-xs text-g-600">Selected: {{ exemptionFile.name }}</p>
         </ElFormItem>
         <ElFormItem label="Notes for Admin">
           <ElInput v-model="exemptionForm.customer_notes" type="textarea" :rows="2" />
@@ -385,6 +397,7 @@
 
 <script setup lang="ts">
   import { useRouter } from 'vue-router'
+  import PhotoToPdfPicker from '@/components/business/PhotoToPdfPicker.vue'
   import { ElMessage, type UploadFile } from 'element-plus'
   import {
     changePortalPassword,

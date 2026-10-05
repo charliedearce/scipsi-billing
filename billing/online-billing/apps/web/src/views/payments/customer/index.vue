@@ -780,6 +780,12 @@
                 </div>
               </template>
             </ElUpload>
+            <PhotoToPdfPicker
+              :allowed-mime-types="paymentProofType?.allowed_mime_types"
+              :max-file-size-kb="paymentProofType?.max_file_size_kb"
+              @created="(file) => (proofFile = file)"
+            />
+            <p v-if="proofFile" class="mt-1 text-xs text-g-600">Selected: {{ proofFile.name }}</p>
           </div>
         </div>
       </div>
@@ -835,6 +841,12 @@
               ><ElIcon class="mr-1"><UploadFilled /></ElIcon> Choose New File</ElButton
             >
           </ElUpload>
+          <PhotoToPdfPicker
+            :allowed-mime-types="paymentProofType?.allowed_mime_types"
+            :max-file-size-kb="paymentProofType?.max_file_size_kb"
+            @created="(file) => (proofFile = file)"
+          />
+          <p v-if="proofFile" class="mt-1 text-xs text-g-600">Selected: {{ proofFile.name }}</p>
         </div>
       </div>
 
@@ -1298,6 +1310,7 @@
   import StatusTag from '@/components/business/StatusTag.vue'
   import ProofViewerModal from '@/components/business/ProofViewerModal.vue'
   import PaymentInstructionBody from '@/components/business/PaymentInstructionBody.vue'
+  import PhotoToPdfPicker from '@/components/business/PhotoToPdfPicker.vue'
   import { formatDateTimeManila } from '@/utils/date/formatDateTime'
   import { mittBus } from '@/utils/sys'
   import { fetchGetUserInfo } from '@/api/auth'
