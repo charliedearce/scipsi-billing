@@ -104,6 +104,8 @@ VIP is an additional customer type with account-level credit eligibility, [credi
 
 2026-10-05 hosting decision: the user selected Coolify on the `scipsi.com` VPS. The current deployment at `staging.scipsi.com` is an isolated technical staging exercise using synthetic data; it does not authorize the Phase 6 pilot or production cutover. See [deployment evidence](docs/evidence/P1-04-STAGING-DEPLOY.md).
 
+2026-10-06 staging delivery update: `staging.scipsi.com` now runs from a Git-backed Coolify Compose application following `codex/teller-customer-workflow`; pushes to that branch trigger staging deployments through a GitHub webhook. This does not change the isolated staging scope or production cutover gate. See [Git deployment evidence](docs/evidence/P1-04-GIT-STAGING.md).
+
 | Existing behavior/evidence | Proposed improvement | Proof required |
 | --- | --- | --- |
 | Invoice items can precede headers; header and number consumption are separate (`BillingMod`, `BillingAddMod`) | Draft header owns draft items; posting transaction commits snapshots, number, audit, and outbox together | Failure injection leaves no partial posting; retries return the same document |
