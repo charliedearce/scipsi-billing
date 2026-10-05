@@ -6,7 +6,7 @@
 - Status: Git-backed staging live at `https://staging.scipsi.com`; production cutover remains open.
 - Branch: `codex/teller-customer-workflow` in `charliedearce/scipsi-billing`.
 - Application: Coolify `duue6sfl9qr3ko2ynkpuohlv` in the existing staging environment. The old service `v5txsjklyp7ejjfqivx9dmft` is stopped, retained for rollback.
-- Tested deployment: `gz9sim0drbendpv0v8rwewgs`, source commit `3c12b36`.
+- Tested deployment: `gz9sim0drbendpv0v8rwewgs`, source commit `3c12b36`; a later documentation-only push deployed `e0dc5f5` automatically as `lxloalwod3kvajhe5ft1yfo8`.
 
 ## Implementation and evidence
 
@@ -29,5 +29,5 @@
 - Database workflow: Existing synthetic staging database inspected; no financial posting or data import performed.
 - Browser/device: Authenticated customer/teller flows, camera capture, install prompt, and multi-user WebSocket behavior not tested.
 - Print/Crystal: Not tested; no print path changed.
-- Security: Temporary Coolify setup API access/token should be revoked after final verification. Registration remains disabled in staging.
+- Security: Temporary Coolify setup API access was disabled, its token revoked, and the original API IP allowlist restored. Registration remains disabled in staging.
 - Next: Run authenticated browser/mobile acceptance, then use a new push to confirm future unattended staging deployment and review deployment health.
