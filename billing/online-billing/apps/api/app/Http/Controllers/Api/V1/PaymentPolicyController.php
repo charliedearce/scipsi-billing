@@ -5,10 +5,14 @@ namespace App\Http\Controllers\Api\V1;
 use App\Events\DataRefreshEvent;
 use App\Exceptions\ConcurrencyException;
 use App\Http\Controllers\Controller;
+use App\Models\PaymentPolicyImage;
 use App\Models\PaymentPolicyVersion;
+use App\Services\Billing\PaymentInstructionHtml;
 use App\Services\Billing\PaymentPolicyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PaymentPolicyController extends Controller
 {
@@ -25,7 +29,7 @@ class PaymentPolicyController extends Controller
             'currency' => ['nullable', 'string', 'size:3'],
             'gateway_enabled' => ['nullable', 'boolean'],
             'gateway_threshold_amount' => ['nullable', 'regex:/^\d+(\.\d{1,2})?$/', 'min:0'],
-            'manual_instructions' => ['required', 'string', 'min:10', 'max:5000'],
+            'manual_instructions' => ['required', 'string', 'max:8000000'],
             'manual_deadline_hours' => ['required', 'integer', 'min:1', 'max:720'],
             'review_target_hours' => ['nullable', 'integer', 'min:0', 'max:720'],
             'clearance_target_hours' => ['nullable', 'integer', 'min:0', 'max:720'],
@@ -54,6 +58,23 @@ class PaymentPolicyController extends Controller
         $this->broadcastRefresh($policy, 'published');
 
         return response()->json(['data' => $policy, 'message' => 'Payment-route policy published. Existing payment instructions retain their original policy snapshot and deadline.']);
+    }
+
+    public function image(Request $request, int $id, PaymentInstructionHtml $instructions): StreamedResponse
+    {
+        $image = PaymentPolicyImage::query()
+            ->where('organization_id', $request->user()->organization_id)
+            ->find($id);
+        if (! $image || ! $instructions->canView($request->user(), $image) || ! Storage::disk('local_private')->exists($image->storage_path)) {
+            abort(404);
+        }
+
+        return Storage::disk('local_private')->response($image->storage_path, 'bank-instruction', [
+            'Content-Type' => $image->mime_type,
+            'Content-Disposition' => 'inline',
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, max-age=3600',
+        ]);
     }
 
     public function portalIndex(Request $request): JsonResponse

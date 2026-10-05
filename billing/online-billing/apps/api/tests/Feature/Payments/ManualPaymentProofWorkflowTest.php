@@ -292,6 +292,41 @@ class ManualPaymentProofWorkflowTest extends TestCase
         $this->assertDatabaseCount('receipts', 1);
     }
 
+    public function test_confirmed_bank_excess_posts_once_and_becomes_customer_payment_credit(): void
+    {
+        $invoice = $this->postedInvoice();
+        $submission = $this->submit($invoice, $this->paymentProof());
+        $claimed = $this->actingAs($this->tellerOne, 'sanctum')->postJson('/api/v1/teller/payment-submissions/claim-next')
+            ->assertOk()->json('data');
+        $approval = $this->approvalPayload($invoice, $claimed['lock_version'], (string) $invoice->total_charge_amount);
+        $approval['confirmed_cash_total'] = bcadd((string) $invoice->total_charge_amount, '50.00', 2);
+
+        $response = $this->actingAs($this->tellerOne, 'sanctum')->postJson('/api/v1/teller/payment-submissions/'.$submission->id.'/approve', $approval)
+            ->assertOk();
+        $receiptId = $response->json('data.receipt_id');
+        $this->assertDatabaseHas('receipts', ['id' => $receiptId, 'cash_received_amount' => $approval['confirmed_cash_total'], 'unapplied_amount' => '50.00']);
+        $this->assertDatabaseHas('customer_payment_credits', ['source_receipt_id' => $receiptId, 'original_amount' => '50.00']);
+        $this->assertDatabaseCount('receipts', 1);
+        $this->actingAs($this->tellerOne, 'sanctum')->postJson('/api/v1/teller/payment-submissions/'.$submission->id.'/approve', $approval)->assertOk();
+        $this->assertDatabaseCount('customer_payment_credits', 1);
+        $this->assertDatabaseCount('receipts', 1);
+    }
+
+    public function test_confirmed_total_below_bill_cash_is_rejected_without_a_receipt(): void
+    {
+        $invoice = $this->postedInvoice();
+        $submission = $this->submit($invoice, $this->paymentProof());
+        $claimed = $this->actingAs($this->tellerOne, 'sanctum')->postJson('/api/v1/teller/payment-submissions/claim-next')
+            ->assertOk()->json('data');
+        $approval = $this->approvalPayload($invoice, $claimed['lock_version'], (string) $invoice->total_charge_amount);
+        $approval['confirmed_cash_total'] = bcsub((string) $invoice->total_charge_amount, '0.01', 2);
+
+        $this->actingAs($this->tellerOne, 'sanctum')->postJson('/api/v1/teller/payment-submissions/'.$submission->id.'/approve', $approval)
+            ->assertStatus(422)->assertJsonValidationErrors('confirmed_cash_total');
+        $this->assertDatabaseCount('receipts', 0);
+        $this->assertDatabaseCount('customer_payment_credits', 0);
+    }
+
     public function test_teller_can_apply_approved_withholding_with_bank_proof_without_exceeding_selected_bill(): void
     {
         $invoice = $this->postedInvoice();

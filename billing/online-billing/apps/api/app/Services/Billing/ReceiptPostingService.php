@@ -154,6 +154,10 @@ class ReceiptPostingService
                 foreach ($postedAllocations as $row) {
                     $prior[] = ['type' => 'WITHHOLDING', 'status' => 'POSTED', 'amount' => $row->withholding_applied_amount];
                 }
+                $creditApplied = app(CustomerPaymentCreditService::class)->applicationsForInvoices([$invoiceId])[$invoiceId] ?? '0.00';
+                if (bccomp($creditApplied, '0.00', 2) > 0) {
+                    $prior[] = ['type' => 'CASH', 'status' => 'POSTED', 'amount' => $creditApplied];
+                }
                 $applications = collect($input['withholding_applications'] ?? [])->map(function (array $application) use ($certificates): array {
                     $certificate = $certificates->get((int) $application['certificate_id']);
 
@@ -185,6 +189,21 @@ class ReceiptPostingService
                 }
                 $appliedTotal = bcadd($appliedTotal, $result['current']['applied_amount'], 2);
                 $unapplied = bcadd($unapplied, $result['current']['unapplied_confirmed_amount'], 2);
+            }
+            if (isset($data['unallocated_tender'])) {
+                if ($data['source_type'] !== 'MANUAL_PAYMENT_PROOF') {
+                    throw ValidationException::withMessages(['unallocated_tender' => ['Only confirmed manual payment proofs may include unallocated cash.']]);
+                }
+                $tender = $data['unallocated_tender'];
+                if (! in_array(strtoupper((string) ($tender['type'] ?? '')), ['BANK_TRANSFER', 'CHECK'], true)
+                    || ! in_array(strtoupper((string) ($tender['status'] ?? '')), ['CONFIRMED', 'CLEARED'], true)
+                    || ! preg_match('/^\d+(\.\d{1,2})?$/', (string) ($tender['amount'] ?? ''))
+                    || bccomp((string) $tender['amount'], '0.00', 2) <= 0) {
+                    throw ValidationException::withMessages(['unallocated_tender' => ['Unallocated funds must be a positive confirmed bank transfer or cleared check.']]);
+                }
+                ReceiptTender::create(['receipt_id' => $receipt->id, 'tender_type' => strtoupper($tender['type']), 'status' => strtoupper($tender['status']), 'amount' => $tender['amount'], 'reference' => $tender['reference'] ?? null, 'tender_snapshot' => $tender]);
+                $cashReceived = bcadd($cashReceived, (string) $tender['amount'], 2);
+                $unapplied = bcadd($unapplied, (string) $tender['amount'], 2);
             }
             $receipt->update(['cash_received_amount' => $cashReceived, 'withholding_received_amount' => $withholdingReceived, 'applied_amount' => $appliedTotal, 'unapplied_amount' => $unapplied]);
             $source->update(['receipt_id' => $receipt->id]);

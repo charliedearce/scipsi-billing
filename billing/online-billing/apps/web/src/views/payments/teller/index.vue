@@ -398,6 +398,27 @@
           </div>
 
           <!-- Verified Reference Input -->
+          <div class="rounded-xl border border-g-200 p-4 space-y-3">
+            <label
+              class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider"
+            >
+              Bank-confirmed deposit total
+            </label>
+            <ElInput
+              v-model="confirmedCashTotal"
+              inputmode="decimal"
+              placeholder="0.00"
+              :disabled="!isAssignedToMe || current.status !== 'IN_REVIEW'"
+            />
+            <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-g-600">
+              <span>Cash applied to bills: {{ allocatedCash }}</span>
+              <span>Customer payment credit: {{ cashExcess }}</span>
+            </div>
+            <p class="m-0 text-xs text-g-500">
+              Enter the full amount verified with the bank. Any amount above the selected bills will
+              reduce this customer's next checkout.
+            </p>
+          </div>
           <div>
             <label
               class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1"
@@ -672,7 +693,12 @@
   import { downloadPrivateFile } from '@/api/documentRequirements'
   import { fetchAdminWithholding, type WithholdingCertificate } from '@/api/taxEvidence'
   import { fetchGetUserInfo } from '@/api/auth'
-  import { planWithholding, usableWithholdingCertificates } from '@/utils/billing/withholdingPlan'
+  import {
+    fromCents,
+    planWithholding,
+    toCents,
+    usableWithholdingCertificates
+  } from '@/utils/billing/withholdingPlan'
   import { formatDateTimeManila } from '@/utils/date/formatDateTime'
   import { useAuthoritativeRealtimeRefresh } from '@/composables/useAuthoritativeRealtimeRefresh'
   import { useUserStore } from '@/store/modules/user'
@@ -702,6 +728,7 @@
   const selectedCertificateId = ref<number | 'auto' | null>(null)
   const cashEdits = ref<Record<number, string>>({})
   const confirmedReference = ref('')
+  const confirmedCashTotal = ref('0.00')
   const receiptKind = ref<'OFFICIAL' | 'ACKNOWLEDGEMENT'>('OFFICIAL')
   const queueFilter = ref<'all' | 'mine'>('all')
 
@@ -842,6 +869,12 @@
       return total + cash + wht
     }, 0)
   })
+  const allocatedCash = computed(() =>
+    fromCents(decisionRows.value.reduce((total, row) => total + toCents(row.cash_amount), 0))
+  )
+  const cashExcess = computed(() =>
+    fromCents(Math.max(0, toCents(confirmedCashTotal.value) - toCents(allocatedCash.value)))
+  )
 
   async function loadQueue() {
     loading.value = true
@@ -883,6 +916,7 @@
       }
       selectedCertificateId.value = applicableCertificates.value.length ? 'auto' : null
       applyWithholdingPlan(false)
+      confirmedCashTotal.value = allocatedCash.value
     } catch (error: any) {
       ElMessage.error(error?.message || 'Unable to load payment proof detail.')
     } finally {
@@ -997,6 +1031,7 @@
       const updated = await approvePaymentSubmission(current.value.id, {
         expected_version: current.value.lock_version,
         confirmed_reference: confirmedReference.value || undefined,
+        confirmed_cash_total: confirmedCashTotal.value,
         receipt_kind: receiptKind.value,
         allocations: reviewAllocations()
       })

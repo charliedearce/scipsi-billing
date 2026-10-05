@@ -12,7 +12,6 @@ use App\Models\PaymentGroup;
 use App\Models\PaymentGroupEvent;
 use App\Models\PaymentGroupItem;
 use App\Models\PaymentPolicyVersion;
-use App\Models\ReceiptAllocation;
 use App\Models\User;
 use App\Models\WalkInCustomer;
 use App\Services\Sms\NotificationEventRecorder;
@@ -34,6 +33,7 @@ class PaymentPolicyService
     public function __construct(
         protected SmsDeliveryOrchestrator $smsOrchestrator,
         protected NotificationEventRecorder $notificationEvents,
+        protected PaymentInstructionHtml $instructionHtml,
     ) {}
 
     /** @return Collection<int, PaymentPolicyVersion> */
@@ -58,7 +58,7 @@ class PaymentPolicyService
                 'currency' => strtoupper((string) ($data['currency'] ?? 'PHP')),
                 'gateway_enabled' => (bool) ($data['gateway_enabled'] ?? false),
                 'gateway_threshold_amount' => isset($data['gateway_threshold_amount']) ? $this->decimal((string) $data['gateway_threshold_amount']) : null,
-                'manual_instructions' => trim((string) $data['manual_instructions']),
+                'manual_instructions' => $this->instructionHtml->store($actor, (string) $data['manual_instructions']),
                 'manual_deadline_hours' => (int) $data['manual_deadline_hours'],
                 'review_target_hours' => isset($data['review_target_hours']) ? (int) $data['review_target_hours'] : null,
                 'clearance_target_hours' => isset($data['clearance_target_hours']) ? (int) $data['clearance_target_hours'] : null,
@@ -78,6 +78,7 @@ class PaymentPolicyService
     public function publish(PaymentPolicyVersion $policy, User $actor, int $expectedVersion, string $reason): PaymentPolicyVersion
     {
         return DB::transaction(function () use ($policy, $actor, $expectedVersion, $reason): PaymentPolicyVersion {
+            Organization::whereKey($actor->organization_id)->lockForUpdate()->firstOrFail();
             $locked = PaymentPolicyVersion::where('organization_id', $actor->organization_id)
                 ->whereKey($policy->id)->lockForUpdate()->firstOrFail();
             if ($locked->lock_version !== $expectedVersion) {
@@ -89,12 +90,13 @@ class PaymentPolicyService
             if ($locked->gateway_enabled && $locked->gateway_threshold_amount === null) {
                 throw ValidationException::withMessages(['gateway_threshold_amount' => ['Gateway-enabled policies require a threshold before they can be published.']]);
             }
+            $this->supersedeOpenPublishedPolicies($locked, $actor, $reason);
             $this->assertNoPublishedOverlap($locked);
 
             $locked->update([
                 'status' => PaymentPolicyVersion::STATUS_PUBLISHED,
                 'published_by_user_id' => $actor->id,
-                'published_at' => Carbon::now('Asia/Manila'),
+                'published_at' => Carbon::now('UTC'),
                 'publication_reason' => trim($reason),
                 'lock_version' => $locked->lock_version + 1,
             ]);
@@ -121,6 +123,8 @@ class PaymentPolicyService
                 ->whereKey($data['customer_id'])->lockForUpdate()->firstOrFail();
             $this->assertActiveCustomerAccess($actor, $customer->id);
             $policy = $this->effectivePolicy($actor->organization_id, Carbon::now('Asia/Manila'));
+            $credits = app(CustomerPaymentCreditService::class);
+            $lots = $credits->lockAvailableLots($customer, $policy->currency);
             $invoiceIds = $inputs->pluck('invoice_id')->sort()->values()->all();
             $invoices = Invoice::where('organization_id', $actor->organization_id)
                 ->whereIn('id', $invoiceIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
@@ -149,10 +153,15 @@ class PaymentPolicyService
                 $grossSelected = bcadd($grossSelected, $input['requested_amount'], 2);
             }
 
+            $checkoutKey = (string) Str::uuid();
+            $application = $credits->applyToLockedInvoices($actor, $customer, $lots, $invoices->values(), $checkoutKey);
+            $cashDue = bcsub($grossSelected, $application['total'], 2);
+            $creditOnly = bccomp($cashDue, '0.00', 2) === 0;
+
             // A policy may be published ahead of P3-06, but no provider exists
             // yet to create or verify the gateway route. Do not silently fall
             // back to a second channel for an otherwise gateway-eligible group.
-            if ($policy->gateway_enabled && bccomp($grossSelected, (string) $policy->gateway_threshold_amount, 2) === -1) {
+            if (! $creditOnly && $policy->gateway_enabled && bccomp($grossSelected, (string) $policy->gateway_threshold_amount, 2) === -1) {
                 throw ValidationException::withMessages([
                     'allocations' => ['The selected balance is gateway-eligible, but no verified provider route is available until P3-06. Publish a manual-only policy or complete provider setup.'],
                 ]);
@@ -166,36 +175,56 @@ class PaymentPolicyService
                 'payment_policy_version_id' => $policy->id,
                 'payment_policy_version_number' => $policy->version_number,
                 'created_by_user_id' => $actor->id,
-                'source_key' => (string) Str::uuid(),
-                'route' => PaymentGroup::ROUTE_MANUAL_BANK,
-                'payment_method' => $paymentMethod,
-                'check_clearance_status' => $paymentMethod === PaymentGroup::METHOD_CHECK_DEPOSIT ? PaymentGroup::CHECK_PENDING : PaymentGroup::CHECK_NOT_APPLICABLE,
-                'status' => PaymentGroup::STATUS_MANUAL_INSTRUCTION_ISSUED,
+                'source_key' => $checkoutKey,
+                'route' => $creditOnly ? PaymentGroup::ROUTE_CUSTOMER_CREDIT : PaymentGroup::ROUTE_MANUAL_BANK,
+                'payment_method' => $creditOnly ? PaymentGroup::METHOD_CUSTOMER_CREDIT : $paymentMethod,
+                'check_clearance_status' => ! $creditOnly && $paymentMethod === PaymentGroup::METHOD_CHECK_DEPOSIT
+                    ? PaymentGroup::CHECK_PENDING : PaymentGroup::CHECK_NOT_APPLICABLE,
+                'status' => $creditOnly ? PaymentGroup::STATUS_SETTLED : PaymentGroup::STATUS_MANUAL_INSTRUCTION_ISSUED,
                 'currency' => $policy->currency,
                 'gross_selected_amount' => $grossSelected,
+                'credit_applied_amount' => $application['total'],
+                'cash_due_amount' => $cashDue,
                 'gateway_threshold_snapshot' => $policy->gateway_threshold_amount,
                 'manual_instructions_snapshot' => $policy->manual_instructions,
                 'manual_deadline_hours_snapshot' => $policy->manual_deadline_hours,
                 'review_target_hours_snapshot' => $policy->review_target_hours,
                 'clearance_target_hours_snapshot' => $policy->clearance_target_hours,
                 'correction_window_hours_snapshot' => $policy->correction_window_hours,
-                'instruction_issued_at' => $issuedAt,
-                'payment_deadline_at' => $issuedAt->copy()->addHours($policy->manual_deadline_hours),
+                'instruction_issued_at' => $creditOnly ? null : $issuedAt,
+                'payment_deadline_at' => $creditOnly ? null : $issuedAt->copy()->addHours($policy->manual_deadline_hours),
+                'settled_at' => $creditOnly ? $issuedAt : null,
                 'lock_version' => 1,
             ]);
             foreach ($inputs as $input) {
+                $remainingCash = bcsub($input['requested_amount'], $application['by_invoice'][$input['invoice_id']] ?? '0.00', 2);
+                if (bccomp($remainingCash, '0.00', 2) <= 0) {
+                    continue;
+                }
                 PaymentGroupItem::create([
                     'payment_group_id' => $group->id,
                     'invoice_id' => $input['invoice_id'],
                     'expected_invoice_lock_version' => $input['expected_invoice_lock_version'],
-                    'requested_amount' => $input['requested_amount'],
+                    'requested_amount' => $remainingCash,
                 ]);
+            }
+            if ($creditOnly) {
+                $this->event($group, $actor, 'CUSTOMER_CREDIT_SETTLED', null, PaymentGroup::STATUS_SETTLED, null, [
+                    'invoice_ids' => $invoiceIds,
+                    'gross_selected_amount' => $grossSelected,
+                    'credit_applied_amount' => $application['total'],
+                ]);
+                $this->auditGroup($group, $actor, 'CUSTOMER_CREDIT_SETTLED', 'proofs:upload', 'Customer payment credit settled selected bills.');
+
+                return $this->loadGroup($group);
             }
             $this->event($group, $actor, 'MANUAL_INSTRUCTION_ISSUED', null, PaymentGroup::STATUS_MANUAL_INSTRUCTION_ISSUED, null, [
                 'policy_version_id' => $policy->id,
                 'policy_version_number' => $policy->version_number,
                 'invoice_ids' => $invoiceIds,
                 'gross_selected_amount' => $grossSelected,
+                'credit_applied_amount' => $application['total'],
+                'cash_due_amount' => $cashDue,
                 'deadline_at' => $group->payment_deadline_at->toIso8601String(),
                 'payment_method' => $paymentMethod,
             ]);
@@ -420,6 +449,39 @@ class PaymentPolicyService
         }
     }
 
+    protected function supersedeOpenPublishedPolicies(PaymentPolicyVersion $candidate, User $actor, string $reason): void
+    {
+        $open = PaymentPolicyVersion::where('organization_id', $candidate->organization_id)
+            ->where('status', PaymentPolicyVersion::STATUS_PUBLISHED)
+            ->whereNull('effective_to')
+            ->lockForUpdate()
+            ->get();
+        if ($open->isEmpty()) {
+            return;
+        }
+
+        $cutover = $candidate->effective_from->greaterThan(Carbon::now('UTC'))
+            ? $candidate->effective_from->copy()
+            : Carbon::now('UTC');
+        foreach ($open as $policy) {
+            if ($policy->effective_from->greaterThanOrEqualTo($cutover)) {
+                $cutover = $policy->effective_from->copy()->addSecond();
+            }
+        }
+        if ($candidate->effective_to && $candidate->effective_to->lessThanOrEqualTo($cutover)) {
+            throw ValidationException::withMessages(['effective_to' => ['The policy end must be after its publication cutover.']]);
+        }
+
+        $candidate->forceFill(['effective_from' => $cutover])->save();
+        foreach ($open as $policy) {
+            $policy->forceFill([
+                'effective_to' => $cutover,
+                'lock_version' => $policy->lock_version + 1,
+            ])->save();
+            $this->audit($policy, $actor, 'PAYMENT_POLICY_SUPERSEDED', 'payment_policies:manage', trim($reason));
+        }
+    }
+
     /** @param array{expected_invoice_lock_version:int,requested_amount:string} $input */
     protected function assertInvoiceSelectable(Invoice $invoice, Customer $customer, array $input, string $currency): void
     {
@@ -462,9 +524,7 @@ class PaymentPolicyService
 
     protected function outstandingAmount(int $invoiceId, string $totalCharge): string
     {
-        $applied = (string) ReceiptAllocation::where('invoice_id', $invoiceId)
-            ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))
-            ->sum('applied_amount');
+        $applied = app(InvoiceSettlementService::class)->appliedForInvoices([$invoiceId])[$invoiceId] ?? '0.00';
         $remaining = bcsub($totalCharge, $applied, 2);
 
         return bccomp($remaining, '0.00', 2) > 0 ? $remaining : '0.00';
@@ -511,7 +571,7 @@ class PaymentPolicyService
             'actor_type' => 'user',
             'actor_id' => $actor->id,
             'permission_snapshot' => $permission,
-            'occurred_at' => Carbon::now('Asia/Manila'),
+            'occurred_at' => Carbon::now('UTC'),
             'reason' => $reason,
             'metadata' => ['version_number' => $policy->version_number, 'status' => $policy->status],
         ]);

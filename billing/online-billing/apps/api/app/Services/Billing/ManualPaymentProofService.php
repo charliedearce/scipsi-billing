@@ -59,8 +59,9 @@ class ManualPaymentProofService
             ->orderByDesc('business_date')
             ->orderByDesc('id')
             ->get();
+        $creditsByInvoice = app(CustomerPaymentCreditService::class)->applicationsForInvoices($invoices->pluck('id')->all());
 
-        return $invoices->map(function (Invoice $invoice): array {
+        return $invoices->map(function (Invoice $invoice) use ($creditsByInvoice): array {
             $applied = '0.00';
             $paidAt = null;
             foreach ($invoice->receiptAllocations as $allocation) {
@@ -70,6 +71,8 @@ class ManualPaymentProofService
                     $paidAt = $receiptPosted;
                 }
             }
+            $creditApplied = $creditsByInvoice[$invoice->id] ?? '0.00';
+            $applied = bcadd($applied, $creditApplied, 2);
             $outstanding = $this->positiveDifference((string) $invoice->total_charge_amount, $applied);
             $request = $invoice->billingRequest;
             if ($request && ! $request->relationLoaded('events')) {
@@ -83,6 +86,7 @@ class ManualPaymentProofService
                 'currency' => $invoice->currency,
                 'total_charge_amount' => (string) $invoice->total_charge_amount,
                 'applied_amount' => $applied,
+                'customer_payment_credit_applied_amount' => $creditApplied,
                 'outstanding_amount' => $outstanding,
                 'lock_version' => $invoice->lock_version,
                 'status' => $invoice->status,
@@ -124,6 +128,8 @@ class ManualPaymentProofService
                 $paidAt = $receiptPosted;
             }
         }
+        $creditApplied = app(CustomerPaymentCreditService::class)->applicationsForInvoices([$invoice->id])[$invoice->id] ?? '0.00';
+        $applied = bcadd($applied, $creditApplied, 2);
         $outstanding = $this->positiveDifference((string) $invoice->total_charge_amount, $applied);
         $artifact = $invoice->canonicalArtifact;
         $pdfReady = $artifact
@@ -185,6 +191,7 @@ class ManualPaymentProofService
                 'tax_amount' => (string) $invoice->tax_amount,
                 'total_charge_amount' => (string) $invoice->total_charge_amount,
                 'applied_amount' => $applied,
+                'customer_payment_credit_applied_amount' => $creditApplied,
                 'outstanding_amount' => $outstanding,
             ],
             'items' => $invoice->items->sortBy('line_number')->values()->map(fn ($item) => [
@@ -510,10 +517,26 @@ class ManualPaymentProofService
                 $paymentTenderType,
                 $paymentTenderStatus,
             );
+            $allocatedCash = '0.00';
+            foreach ($postingAllocations as $allocation) {
+                $allocatedCash = bcadd($allocatedCash, (string) $allocation['tenders'][0]['amount'], 2);
+            }
+            $confirmedCashTotal = $this->decimal((string) ($data['confirmed_cash_total'] ?? $allocatedCash));
+            if (bccomp($confirmedCashTotal, $allocatedCash, 2) < 0) {
+                throw ValidationException::withMessages(['confirmed_cash_total' => ['Confirmed bank funds cannot be less than cash allocated to bills.']]);
+            }
+            $cashExcess = bcsub($confirmedCashTotal, $allocatedCash, 2);
+            $unallocatedTender = bccomp($cashExcess, '0.00', 2) > 0 ? [
+                'type' => $paymentTenderType,
+                'status' => $paymentTenderStatus,
+                'amount' => $cashExcess,
+                'reference' => $data['confirmed_reference'] ?? $locked->declared_reference,
+            ] : null;
             $approvalFingerprint = $this->approvalFingerprint(
                 $data['confirmed_reference'] ?? null,
                 $postingAllocations,
                 $data['receipt_kind'] ?? Receipt::KIND_OFFICIAL,
+                $confirmedCashTotal,
             );
 
             if ($locked->status === ManualPaymentSubmission::STATUS_APPROVED && $locked->receipt_id) {
@@ -556,7 +579,9 @@ class ManualPaymentProofService
                 'payer_name' => $locked->customer->name,
                 'receipt_kind' => $data['receipt_kind'] ?? Receipt::KIND_OFFICIAL,
                 'allocations' => $postingAllocations,
+                'unallocated_tender' => $unallocatedTender,
             ]);
+            app(CustomerPaymentCreditService::class)->createFromReceipt($receipt, $teller);
             if ($normalizedBankReference) {
                 $this->bankTransferReferences->linkReceipt($teller->organization_id, $locked->currency, $normalizedBankReference, $receipt);
             }
@@ -900,9 +925,7 @@ class ManualPaymentProofService
 
     protected function outstandingAmount(int $invoiceId, string $totalCharge): string
     {
-        $applied = (string) ReceiptAllocation::where('invoice_id', $invoiceId)
-            ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))
-            ->sum('applied_amount');
+        $applied = app(InvoiceSettlementService::class)->appliedForInvoices([$invoiceId])[$invoiceId] ?? '0.00';
 
         return $this->positiveDifference($totalCharge, $applied);
     }
@@ -920,12 +943,13 @@ class ManualPaymentProofService
     }
 
     /** @param array<int, array<string, mixed>> $postingAllocations */
-    protected function approvalFingerprint(?string $confirmedReference, array $postingAllocations, string $receiptKind = Receipt::KIND_OFFICIAL): string
+    protected function approvalFingerprint(?string $confirmedReference, array $postingAllocations, string $receiptKind = Receipt::KIND_OFFICIAL, ?string $confirmedCashTotal = null): string
     {
         return hash('sha256', (string) json_encode([
             'confirmed_reference' => $confirmedReference,
             'receipt_kind' => strtoupper($receiptKind),
             'allocations' => $postingAllocations,
+            'confirmed_cash_total' => $confirmedCashTotal,
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 

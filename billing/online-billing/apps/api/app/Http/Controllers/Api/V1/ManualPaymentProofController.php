@@ -135,6 +135,7 @@ class ManualPaymentProofController extends Controller
         $data = $request->validate([
             'expected_version' => ['required', 'integer', 'min:1'],
             'confirmed_reference' => ['nullable', 'string', 'max:128'],
+            'confirmed_cash_total' => ['nullable', 'regex:/^\d+(\.\d{1,2})?$/'],
             'receipt_kind' => ['nullable', 'string', 'in:OFFICIAL,ACKNOWLEDGEMENT'],
             'allocations' => ['required', 'array', 'min:1'],
             'allocations.*.invoice_id' => ['required', 'integer'],

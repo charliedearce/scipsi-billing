@@ -270,6 +270,31 @@
     >
       <div v-if="selectedCustomer" class="space-y-6">
         <div class="rounded-lg border border-g-200 bg-g-100/50 p-4">
+          <h4 class="text-sm font-medium text-g-900">Customer payment credit</h4>
+          <p class="mt-1 text-xs text-g-500"
+            >Confirmed overpayments held for future bills. This is separate from VIP borrowing
+            credit.</p
+          >
+          <div class="mt-2 text-xl font-semibold text-g-900"
+            >{{ paymentCredit?.available_amount || '0.00' }}
+            {{ paymentCredit?.currency || 'PHP' }}</div
+          >
+          <div
+            v-for="lot in paymentCredit?.history || []"
+            :key="lot.id"
+            class="mt-3 border-t border-g-200 pt-2 text-xs text-g-600"
+          >
+            <div
+              >Receipt {{ lot.source_receipt_number || lot.source_receipt_id }} · Original excess
+              {{ lot.original_amount }} · Remaining {{ lot.remaining_amount }}</div
+            >
+            <div v-for="(movement, index) in lot.movements" :key="index" class="mt-1">
+              {{ movement.type }} {{ movement.amount
+              }}{{ movement.invoice_number ? ` · Bill ${movement.invoice_number}` : '' }}
+            </div>
+          </div>
+        </div>
+        <div class="rounded-lg border border-g-200 bg-g-100/50 p-4">
           <div class="mb-3 flex flex-wrap items-start justify-between gap-2">
             <div>
               <div class="font-mono text-sm text-theme">
@@ -292,8 +317,8 @@
               <ElSwitch v-model="identityForm.is_vip" @change="onVipToggle" />
               <p class="mt-1 text-xs text-g-500">
                 Regular customers default to 11001-0000. VIP clients need their own account number.
-                Tagging VIP does not open credit borrowing — publish a VIP Credit profile below after
-                the organization credit policy is published.
+                Tagging VIP does not open credit borrowing — publish a VIP Credit profile below
+                after the organization credit policy is published.
               </p>
             </ElFormItem>
             <ElFormItem label="Account number" required>
@@ -863,6 +888,10 @@
   import DocumentPreviewPane from '@/components/business/DocumentPreviewPane.vue'
   import { downloadPrivateFile } from '@/api/documentRequirements'
   import {
+    fetchAdminCustomerPaymentCredit,
+    type CustomerPaymentCreditSummary
+  } from '@/api/payments'
+  import {
     createAdminCustomer,
     fetchAdminCustomerDetail,
     fetchAdminCustomers,
@@ -901,6 +930,7 @@
   const savingStatus = ref(false)
   const customers = ref<any[]>([])
   const selectedCustomer = ref<any>(null)
+  const paymentCredit = ref<CustomerPaymentCreditSummary | null>(null)
   const drawerVisible = ref(false)
   const dialogVisible = ref(false)
   const statusDialogVisible = ref(false)
@@ -1394,6 +1424,7 @@
       isEditing.value = true
       assignIdentityForm(selectedCustomer.value)
       drawerVisible.value = true
+      paymentCredit.value = await fetchAdminCustomerPaymentCredit(selectedCustomer.value.id)
       await loadCreditProfile(selectedCustomer.value)
     } catch (error: any) {
       ElMessage.error(error?.message || 'Failed to load customer details.')

@@ -69,8 +69,9 @@
             row.publication_reason || 'Draft not yet published'
           }}</template></ElTableColumn
         >
-        <ElTableColumn label="Actions" width="110" fixed="right"
+        <ElTableColumn label="Actions" width="170" fixed="right"
           ><template #default="{ row }"
+            ><ElButton size="small" link @click="selectedPolicy = row">View</ElButton
             ><ElButton
               v-if="row.status === 'DRAFT'"
               size="small"
@@ -85,9 +86,56 @@
     </ElCard>
 
     <ElDrawer
+      :model-value="!!selectedPolicy"
+      :title="
+        selectedPolicy ? `Payment policy v${selectedPolicy.version_number}` : 'Payment policy'
+      "
+      size="min(760px, 100%)"
+      @close="selectedPolicy = null"
+    >
+      <template v-if="selectedPolicy">
+        <ElDescriptions :column="1" border>
+          <ElDescriptionsItem label="Status">{{ selectedPolicy.status }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Effective from">{{
+            formatDateTimeManila(selectedPolicy.effective_from)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Effective to">{{
+            selectedPolicy.effective_to
+              ? formatDateTimeManila(selectedPolicy.effective_to)
+              : 'Open ended'
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Currency">{{ selectedPolicy.currency }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Payment route">{{
+            selectedPolicy.gateway_enabled ? 'Gateway enabled' : 'Manual bank payment only'
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem v-if="selectedPolicy.gateway_enabled" label="Gateway threshold">{{
+            formatAmount(selectedPolicy.gateway_threshold_amount || '0', selectedPolicy.currency)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Manual payment deadline"
+            >{{ selectedPolicy.manual_deadline_hours }} hours</ElDescriptionsItem
+          >
+          <ElDescriptionsItem label="Review target">{{
+            hoursLabel(selectedPolicy.review_target_hours)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Clearance target">{{
+            hoursLabel(selectedPolicy.clearance_target_hours)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Correction window">{{
+            hoursLabel(selectedPolicy.correction_window_hours)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Publication reason">{{
+            selectedPolicy.publication_reason || '—'
+          }}</ElDescriptionsItem>
+        </ElDescriptions>
+        <h3 class="mt-5 mb-2 font-semibold">Customer-facing manual bank instructions</h3>
+        <PaymentInstructionBody :content="selectedPolicy.manual_instructions" />
+      </template>
+    </ElDrawer>
+
+    <ElDrawer
       v-model="drawerOpen"
       title="New payment-route policy draft"
-      size="560px"
+      size="min(760px, 100%)"
       destroy-on-close
     >
       <ElForm label-position="top" @submit.prevent="saveDraft">
@@ -95,7 +143,7 @@
           type="info"
           :closable="false"
           show-icon
-          title="Manual bank instructions are customer-visible and will be frozen on each payment instruction. Do not include credentials or internal-only reconciliation notes."
+          title="These instructions are shown to the customer for a bank transfer or a deposit check. Format the text and insert a bank image. The wording and image are frozen on each payment instruction already issued."
         />
         <div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <ElFormItem label="Currency"
@@ -133,15 +181,30 @@
               class="!w-full"
           /></ElFormItem>
         </div>
-        <ElFormItem label="Customer-facing manual bank instructions" required
-          ><ElInput
+        <ElFormItem label="Customer-facing manual bank instructions" required>
+          <ArtWangEditor
             v-model="form.manual_instructions"
-            type="textarea"
-            :rows="6"
-            maxlength="5000"
-            show-word-limit
-            placeholder="State receiving bank/account instructions, required reference and where the customer can ask for support."
-        /></ElFormItem>
+            height="280px"
+            mode="simple"
+            placeholder="Explain how to pay by bank transfer or deposit check. Insert a picture of the receiving bank account."
+            :inline-images="true"
+            :exclude-keys="[]"
+            :toolbar-keys="[
+              'bold',
+              'italic',
+              'underline',
+              '|',
+              'bulletedList',
+              'numberedList',
+              '|',
+              'insertLink',
+              'uploadImage',
+              '|',
+              'undo',
+              'redo'
+            ]"
+          />
+        </ElFormItem>
         <ElDivider content-position="left">Future gateway route</ElDivider>
         <ElFormItem label="Enable gateway routing"
           ><ElSwitch v-model="form.gateway_enabled"
@@ -169,6 +232,8 @@
 <script setup lang="ts">
   import { onMounted, reactive, ref } from 'vue'
   import { ElMessage, ElMessageBox } from 'element-plus'
+  import PaymentInstructionBody from '@/components/business/PaymentInstructionBody.vue'
+  import { formatDateTimeManila } from '@/utils/date/formatDateTime'
   import {
     createPaymentPolicy,
     fetchPaymentPolicies,
@@ -180,6 +245,7 @@
   defineOptions({ name: 'PaymentPolicies' })
 
   const policies = ref<PaymentPolicyVersion[]>([])
+  const selectedPolicy = ref<PaymentPolicyVersion | null>(null)
   const loading = ref(false)
   const saving = ref(false)
   const drawerOpen = ref(false)
@@ -199,6 +265,8 @@
       Number(amount || 0)
     )
   }
+
+  const hoursLabel = (hours?: number | null) => (hours == null ? '—' : `${hours} hours`)
 
   function resetForm() {
     Object.assign(form, {
@@ -257,8 +325,8 @@
           inputErrorMessage: 'Enter at least 3 characters.'
         }
       )
-      const published = await publishPaymentPolicy(policy.id, policy.lock_version, value)
-      policies.value = policies.value.map((item) => (item.id === published.id ? published : item))
+      await publishPaymentPolicy(policy.id, policy.lock_version, value)
+      await loadPolicies()
       ElMessage.success('Payment policy published. Existing instructions were not changed.')
     } catch (error: any) {
       if (error !== 'cancel' && error !== 'close')

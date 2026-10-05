@@ -149,8 +149,8 @@ export interface PaymentGroup {
   customer_id: number
   payment_policy_version_id: number
   payment_policy_version_number: number
-  route: 'MANUAL_BANK'
-  payment_method: 'BANK_TRANSFER' | 'CHECK_DEPOSIT'
+  route: 'MANUAL_BANK' | 'CUSTOMER_CREDIT'
+  payment_method: 'BANK_TRANSFER' | 'CHECK_DEPOSIT' | 'CUSTOMER_CREDIT'
   check_clearance_status: 'NOT_APPLICABLE' | 'PENDING' | 'CLEARED' | 'DISHONORED'
   status:
     | 'MANUAL_INSTRUCTION_ISSUED'
@@ -161,14 +161,16 @@ export interface PaymentGroup {
     | 'SETTLED'
   currency: string
   gross_selected_amount: string
+  credit_applied_amount: string
+  cash_due_amount: string
   gateway_threshold_snapshot?: string | null
   manual_instructions_snapshot: string
   manual_deadline_hours_snapshot: number
   review_target_hours_snapshot?: number | null
   clearance_target_hours_snapshot?: number | null
   correction_window_hours_snapshot?: number | null
-  instruction_issued_at: string
-  payment_deadline_at: string
+  instruction_issued_at: string | null
+  payment_deadline_at: string | null
   review_due_at?: string | null
   clearance_due_at?: string | null
   correction_due_at?: string | null
@@ -224,6 +226,41 @@ export interface PaymentInstructionPayload {
   }>
 }
 
+export interface CustomerPaymentCreditSummary {
+  customer_id: number
+  currency: string
+  available_amount: string
+  history: Array<{
+    id: number
+    source_receipt_id: number
+    source_receipt_number: string | null
+    source_business_date: string | null
+    original_amount: string
+    remaining_amount: string
+    movements: Array<{
+      type: 'CREATED' | 'APPLIED' | 'REVERSED'
+      amount: string
+      invoice_id: number | null
+      invoice_number: string | null
+      created_at: string | null
+    }>
+  }>
+}
+
+export function fetchCustomerPaymentCredit(customerId: number, currency = 'PHP') {
+  return request.get<CustomerPaymentCreditSummary>({
+    url: `/api/v1/portal/customers/${customerId}/payment-credit`,
+    params: { currency }
+  })
+}
+
+export function fetchAdminCustomerPaymentCredit(customerId: number, currency = 'PHP') {
+  return request.get<CustomerPaymentCreditSummary>({
+    url: `/api/v1/admin/customers/${customerId}/payment-credit`,
+    params: { currency }
+  })
+}
+
 export function fetchPortalBills(customerId: number) {
   return request.get<PortalBill[]>({
     url: '/api/v1/portal/bills',
@@ -249,6 +286,14 @@ export function downloadPortalBillPdf(invoiceId: number) {
 export function downloadPortalReceiptPdf(receiptId: number) {
   return request.get<Blob>({
     url: `/api/v1/receipts/${receiptId}/artifacts/download`,
+    responseType: 'blob',
+    showErrorMessage: false
+  })
+}
+
+export function fetchPaymentPolicyImage(id: number) {
+  return request.get<Blob>({
+    url: `/api/v1/payment-policy-images/${id}`,
     responseType: 'blob',
     showErrorMessage: false
   })
@@ -323,6 +368,7 @@ export function approvePaymentSubmission(
   data: {
     expected_version: number
     confirmed_reference?: string
+    confirmed_cash_total?: string
     receipt_kind?: 'OFFICIAL' | 'ACKNOWLEDGEMENT'
     allocations: Array<{
       invoice_id: number

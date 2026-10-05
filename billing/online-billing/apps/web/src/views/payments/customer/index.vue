@@ -30,7 +30,7 @@
     </div>
 
     <!-- Summary Metrics -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       <!-- Total Outstanding Due -->
       <div
         class="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex items-center justify-between"
@@ -104,6 +104,27 @@
           <ElIcon :size="24"><User /></ElIcon>
         </div>
       </div>
+      <div
+        class="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm"
+      >
+        <span class="text-xs font-medium text-slate-500 uppercase tracking-wider"
+          >Customer payment credit</span
+        >
+        <div class="mt-1"
+          ><MoneyDisplay :value="paymentCredit?.available_amount || '0.00'" size="2xl"
+        /></div>
+        <p class="text-xs text-slate-500 mt-1 mb-0"
+          >Automatically deducted from your next checkout.</p
+        >
+        <ElButton
+          v-if="paymentCredit?.history.length"
+          link
+          type="primary"
+          class="mt-2"
+          @click="creditHistoryVisible = true"
+          >View credit activity</ElButton
+        >
+      </div>
     </div>
 
     <!-- Bills: unpaid vs paid -->
@@ -152,9 +173,85 @@
         "
       />
       <template v-else>
+        <div class="mobile-bills space-y-3">
+          <article
+            v-for="bill in pagedBills"
+            :key="bill.id"
+            class="rounded-xl border border-g-200 bg-g-100 p-4 space-y-3"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <button
+                  type="button"
+                  class="font-mono font-semibold text-theme break-all text-left"
+                  @click="openBillDetail(bill)"
+                >
+                  {{ bill.invoice_number }}
+                </button>
+                <p class="text-xs text-g-500 mt-1">Billed {{ bill.business_date }}</p>
+              </div>
+              <ElCheckbox
+                v-if="billsTab === 'unpaid'"
+                :model-value="selectedBills.some((selected) => selected.id === bill.id)"
+                :disabled="!isPayable(bill)"
+                :aria-label="`Select bill ${bill.invoice_number} for payment`"
+                @change="toggleBillSelection(bill)"
+              />
+            </div>
+            <div class="mobile-bill-amounts gap-3 text-sm">
+              <div
+                ><p class="text-xs text-g-500">Total billed</p
+                ><MoneyDisplay
+                  :value="bill.total_charge_amount"
+                  :currency="bill.currency"
+                  size="sm"
+              /></div>
+              <div
+                ><p class="text-xs text-g-500">{{
+                  billsTab === 'unpaid' ? 'Balance due' : 'Amount paid'
+                }}</p
+                ><MoneyDisplay
+                  :value="billsTab === 'unpaid' ? bill.outstanding_amount : bill.applied_amount"
+                  :currency="bill.currency"
+                  size="sm"
+                  :highlight="billsTab === 'unpaid' ? 'due' : 'paid'"
+              /></div>
+            </div>
+            <div v-if="bill.receipt_history?.length" class="border-t border-g-200 pt-3 space-y-2">
+              <p class="text-xs font-medium text-g-500">Receipts</p>
+              <div
+                v-for="receipt in bill.receipt_history"
+                :key="receipt.receipt_id"
+                class="flex flex-wrap items-center gap-2"
+              >
+                <ElButton
+                  size="small"
+                  plain
+                  :disabled="!receipt.pdf_available"
+                  @click="viewReceiptPdf(receipt)"
+                >
+                  {{ receipt.receipt_kind === 'ACKNOWLEDGEMENT' ? 'ACK' : 'OR' }}
+                  {{ receipt.receipt_number }}
+                </ElButton>
+                <ElButton size="small" text type="primary" @click="openReceiptChat(receipt)"
+                  >Chat</ElButton
+                >
+              </div>
+            </div>
+            <ElButton
+              size="small"
+              type="primary"
+              plain
+              class="!w-full"
+              @click="openBillDetail(bill)"
+              >View bill details</ElButton
+            >
+          </article>
+        </div>
         <ElTable
+          ref="billsTableRef"
           :data="pagedBills"
-          class="w-full text-sm"
+          class="desktop-bills-table w-full text-sm"
           stripe
           @selection-change="onUnpaidSelectionChange"
         >
@@ -320,11 +417,18 @@
               <MoneyDisplay :value="selectedBillTotal" size="xl" class="text-white" />
               <span class="text-xs text-slate-400">Invoice total</span>
             </div>
-            <p v-if="selectedWithholdingCents > 0" class="mt-1 text-xs text-slate-300">
+            <p
+              v-if="selectedWithholdingCents > 0 && selectedCreditCents === 0"
+              class="mt-1 text-xs text-slate-300"
+            >
               Approved 2307 {{ formatAmount(selectedWithholding) }} · Cash to deposit
               {{ formatAmount(selectedCashDue) }}
             </p>
-            <p v-else class="mt-1 text-xs text-slate-400">
+            <p v-if="selectedCreditCents > 0" class="mt-1 text-xs text-emerald-300">
+              Customer payment credit −{{ formatAmount(selectedCredit) }} · Remaining before
+              withholding {{ formatAmount(selectedAfterCredit) }}
+            </p>
+            <p v-else-if="selectedCreditCents === 0" class="mt-1 text-xs text-slate-400">
               No approved BIR 2307 applies to these bill dates. Deposit the invoice total.
             </p>
           </div>
@@ -345,7 +449,8 @@
             :loading="issuingInstruction"
             @click="issueInstruction"
           >
-            Get Payment Instructions <ElIcon class="ml-1"><ArrowRight /></ElIcon>
+            {{ selectedAfterCredit === '0.00' ? 'Apply Credit' : 'Continue to Payment' }}
+            <ElIcon class="ml-1"><ArrowRight /></ElIcon>
           </ElButton>
         </div>
       </div>
@@ -379,14 +484,29 @@
               >Check {{ activeInstruction.check_clearance_status.toLowerCase() }}</ElTag
             >
           </div>
-          <p class="mt-2 whitespace-pre-line text-sm text-slate-700 dark:text-slate-300">{{
-            activeInstruction.manual_instructions_snapshot
-          }}</p>
+          <PaymentInstructionBody
+            class="mt-2"
+            :content="activeInstruction.manual_instructions_snapshot"
+          />
           <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
             <span
               >Bill total:
               <strong>{{
                 formatAmount(activeInstruction.gross_selected_amount, activeInstruction.currency)
+              }}</strong></span
+            >
+            <span v-if="Number(activeInstruction.credit_applied_amount) > 0">
+              Customer payment credit:
+              <strong
+                >−{{
+                  formatAmount(activeInstruction.credit_applied_amount, activeInstruction.currency)
+                }}</strong
+              >
+            </span>
+            <span
+              >Remaining cash request:
+              <strong>{{
+                formatAmount(activeInstruction.cash_due_amount, activeInstruction.currency)
               }}</strong></span
             >
             <span v-if="instructionWithholdingCents > 0">
@@ -745,7 +865,7 @@
     <ElDrawer
       v-model="billDetailVisible"
       :title="billDetail?.invoice_number || 'Bill details'"
-      size="720px"
+      size="min(720px, 100vw)"
       destroy-on-close
       class="rounded-l-2xl"
     >
@@ -951,7 +1071,35 @@
             <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-2"
               >Line items</h3
             >
-            <ElTable :data="billDetail.items" size="small" stripe class="w-full text-xs">
+            <div class="mobile-bills space-y-2">
+              <div
+                v-for="item in billDetail.items"
+                :key="item.line_number"
+                class="rounded-lg border border-g-200 p-3 text-sm"
+              >
+                <div class="flex justify-between gap-3 font-medium"
+                  ><span class="min-w-0 break-words">{{ item.description || '—' }}</span
+                  ><MoneyDisplay
+                    :value="item.total_charge_amount"
+                    :currency="billDetail.currency"
+                    size="sm"
+                    weight="bold"
+                /></div>
+                <p v-if="item.tariff_code" class="text-xs text-g-500 font-mono break-all mt-1">{{
+                  item.tariff_code
+                }}</p>
+                <p class="text-xs text-g-500 mt-2"
+                  >Qty {{ item.quantity }} · Rate
+                  {{ formatAmount(item.unit_rate, billDetail.currency) }}</p
+                >
+              </div>
+            </div>
+            <ElTable
+              :data="billDetail.items"
+              size="small"
+              stripe
+              class="desktop-bills-table w-full text-xs"
+            >
               <ElTableColumn prop="line_number" label="#" width="48" />
               <ElTableColumn label="Description" min-width="180">
                 <template #default="{ row }">
@@ -1091,6 +1239,42 @@
       :file-id="attachmentFileId"
       :fetcher="attachmentFetcher"
     />
+    <ElDialog
+      v-model="creditHistoryVisible"
+      title="Customer payment credit activity"
+      width="min(92vw, 640px)"
+    >
+      <div
+        v-for="lot in paymentCredit?.history || []"
+        :key="lot.id"
+        class="border-b border-g-200 py-3 last:border-0"
+      >
+        <div class="flex justify-between gap-3 text-sm font-medium text-g-900">
+          <span>Receipt {{ lot.source_receipt_number || lot.source_receipt_id }}</span>
+          <span>Original excess {{ formatAmount(lot.original_amount) }}</span>
+        </div>
+        <p class="text-xs text-g-600 mt-1 mb-0"
+          >Still available: {{ formatAmount(lot.remaining_amount) }}</p
+        >
+        <p class="text-xs text-g-500 mt-1 mb-2">{{ lot.source_business_date }}</p>
+        <div
+          v-for="(movement, index) in lot.movements"
+          :key="index"
+          class="flex justify-between gap-3 text-xs text-g-600 py-1"
+        >
+          <span>{{
+            movement.type === 'APPLIED'
+              ? `Applied to bill ${movement.invoice_number || movement.invoice_id}`
+              : movement.type === 'REVERSED'
+                ? 'Reversed'
+                : 'Credit received'
+          }}</span>
+          <span
+            >{{ movement.type === 'CREATED' ? '+' : '−' }}{{ formatAmount(movement.amount) }}</span
+          >
+        </div>
+      </div>
+    </ElDialog>
   </div>
 </template>
 
@@ -1113,6 +1297,7 @@
   import MoneyDisplay from '@/components/business/MoneyDisplay.vue'
   import StatusTag from '@/components/business/StatusTag.vue'
   import ProofViewerModal from '@/components/business/ProofViewerModal.vue'
+  import PaymentInstructionBody from '@/components/business/PaymentInstructionBody.vue'
   import { formatDateTimeManila } from '@/utils/date/formatDateTime'
   import { mittBus } from '@/utils/sys'
   import { fetchGetUserInfo } from '@/api/auth'
@@ -1130,6 +1315,7 @@
     fetchPortalPaymentGroups,
     fetchPortalBills,
     fetchPortalBillDetail,
+    fetchCustomerPaymentCredit,
     downloadPortalBillPdf,
     downloadPortalReceiptPdf,
     issueManualPaymentInstruction,
@@ -1138,7 +1324,8 @@
     type ManualPaymentSubmission,
     type PaymentGroup,
     type PortalBill,
-    type PortalBillDetail
+    type PortalBillDetail,
+    type CustomerPaymentCreditSummary
   } from '@/api/payments'
   import {
     fromCents,
@@ -1158,7 +1345,12 @@
   const bills = ref<PortalBill[]>([])
   const submissions = ref<ManualPaymentSubmission[]>([])
   const paymentGroups = ref<PaymentGroup[]>([])
+  const paymentCredit = ref<CustomerPaymentCreditSummary | null>(null)
+  const creditHistoryVisible = ref(false)
   const selectedBills = ref<PortalBill[]>([])
+  const billsTableRef = ref<{
+    toggleRowSelection: (row: PortalBill, selected: boolean) => void
+  } | null>(null)
   const approvedCertificates = ref<WithholdingCertificate[]>([])
   const billsTab = ref<'unpaid' | 'paid'>('unpaid')
   const billsSearchQuery = ref('')
@@ -1228,6 +1420,16 @@
     fromCents(
       selectedBills.value.reduce((total, bill) => total + toCents(bill.outstanding_amount), 0)
     )
+  )
+  const selectedCreditCents = computed(() =>
+    paymentCredit.value &&
+    selectedBills.value.every((bill) => bill.currency === paymentCredit.value?.currency)
+      ? Math.min(toCents(selectedBillTotal.value), toCents(paymentCredit.value.available_amount))
+      : 0
+  )
+  const selectedCredit = computed(() => fromCents(selectedCreditCents.value))
+  const selectedAfterCredit = computed(() =>
+    fromCents(toCents(selectedBillTotal.value) - selectedCreditCents.value)
   )
 
   const selectedWithholding = computed(() =>
@@ -1350,6 +1552,12 @@
     selectedBills.value = rows
   }
 
+  function toggleBillSelection(bill: PortalBill) {
+    if (!isPayable(bill)) return
+    const selected = !selectedBills.value.some((row) => row.id === bill.id)
+    billsTableRef.value?.toggleRowSelection(bill, selected)
+  }
+
   function isPayable(bill: PortalBill) {
     return !activeInstruction.value && Number(bill.outstanding_amount) > 0
   }
@@ -1369,7 +1577,11 @@
   }
 
   function paymentMethodLabel(method: PaymentGroup['payment_method']) {
-    return method === 'CHECK_DEPOSIT' ? 'Check deposit' : 'Bank transfer'
+    return method === 'CUSTOMER_CREDIT'
+      ? 'Customer payment credit'
+      : method === 'CHECK_DEPOSIT'
+        ? 'Check deposit'
+        : 'Bank transfer'
   }
 
   async function loadWorkspace() {
@@ -1383,18 +1595,22 @@
       accountTin.value = link?.customer?.tin || ''
       if (!activeCustomerId.value) return
 
-      const [billList, history, groups, documentTypes, withholdingPage] = await Promise.all([
-        fetchPortalBills(activeCustomerId.value),
-        fetchPaymentSubmissions(activeCustomerId.value),
-        fetchPortalPaymentGroups(activeCustomerId.value),
-        fetchDocumentTypes({ purpose: 'PAYMENT_PROOF', is_active: true }),
-        fetchCustomerWithholding()
-      ])
+      const [billList, history, groups, documentTypes, withholdingPage, credit] = await Promise.all(
+        [
+          fetchPortalBills(activeCustomerId.value),
+          fetchPaymentSubmissions(activeCustomerId.value),
+          fetchPortalPaymentGroups(activeCustomerId.value),
+          fetchDocumentTypes({ purpose: 'PAYMENT_PROOF', is_active: true }),
+          fetchCustomerWithholding(),
+          fetchCustomerPaymentCredit(activeCustomerId.value)
+        ]
+      )
       bills.value = billList
       submissions.value = history.data || []
       paymentGroups.value = groups
       paymentProofType.value = documentTypes[0] || null
       approvedCertificates.value = withholdingPage.data || []
+      paymentCredit.value = credit
     } catch (error: any) {
       ElMessage.error(error?.message || 'Unable to load payment information.')
     } finally {
@@ -1423,8 +1639,13 @@
       })
       paymentGroups.value = [group, ...paymentGroups.value]
       selectedBills.value = []
-      openSubmitDrawer.value = true
-      ElMessage.success('Manual payment instructions and deadline are ready.')
+      await loadWorkspace()
+      if (group.route === 'CUSTOMER_CREDIT') {
+        ElMessage.success('Your selected bills were settled using customer payment credit.')
+      } else {
+        openSubmitDrawer.value = true
+        ElMessage.success('Payment instructions are ready for the remaining cash amount.')
+      }
     } catch (error: any) {
       ElMessage.error(error?.message || 'Unable to issue payment instructions.')
     } finally {
@@ -1638,6 +1859,25 @@
 </script>
 
 <style scoped>
+  .mobile-bills {
+    display: none;
+  }
+
+  @media (max-width: 639px) {
+    .mobile-bills {
+      display: block;
+    }
+
+    .mobile-bill-amounts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+
+    .desktop-bills-table {
+      display: none;
+    }
+  }
+
   .customer-portal-container {
     animation: fadeIn 0.25s ease-out;
   }

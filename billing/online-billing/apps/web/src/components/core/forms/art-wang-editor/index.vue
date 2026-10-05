@@ -54,6 +54,8 @@
       // 是否开启自定义上传
       isCustomUpload?: boolean
     }
+    /** Keep inserted images in the document as data URLs for a later server save. */
+    inlineImages?: boolean
   }
 
   const props = withDefaults(defineProps<Props>(), {
@@ -61,7 +63,8 @@
     mode: 'default',
     placeholder: '请输入内容...',
     excludeKeys: () => ['fontFamily'],
-    isCustomUpload: false
+    isCustomUpload: false,
+    inlineImages: false
   })
 
   const modelValue = defineModel<string>({ required: true })
@@ -117,10 +120,29 @@
     MENU_CONF: {
       uploadImage: {
         fieldName: mergedUploadConfig.value.fieldName,
-        maxFileSize: mergedUploadConfig.value.maxFileSize,
         maxNumberOfFiles: mergedUploadConfig.value.maxNumberOfFiles,
-        allowedFileTypes: mergedUploadConfig.value.allowedFileTypes,
+        allowedFileTypes: props.inlineImages
+          ? ['image/png', 'image/jpeg', 'image/webp']
+          : mergedUploadConfig.value.allowedFileTypes,
         server: uploadServer.value,
+        maxFileSize: props.inlineImages ? 2 * 1024 * 1024 : mergedUploadConfig.value.maxFileSize,
+        ...(props.inlineImages
+          ? {
+              customUpload(file: File, insertFn: InsertFnType) {
+                if (
+                  !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) ||
+                  file.size > 2 * 1024 * 1024
+                ) {
+                  ElMessage.error('Use a PNG, JPEG, or WebP image up to 2 MB.')
+                  return
+                }
+                const reader = new FileReader()
+                reader.onload = () => insertFn(String(reader.result || ''), 'Bank instruction', '')
+                reader.onerror = () => ElMessage.error('The image could not be read.')
+                reader.readAsDataURL(file)
+              }
+            }
+          : {}),
         headers: {
           Authorization: userStore.accessToken
         },
@@ -137,7 +159,10 @@
 
   // 自定义上传
   if (props.uploadConfig?.isCustomUpload && props.uploadConfig?.server && editorConfig.MENU_CONF) {
-    editorConfig.MENU_CONF.uploadImage.customUpload = async (file: File, insertFn: InsertFnType) => {
+    editorConfig.MENU_CONF.uploadImage.customUpload = async (
+      file: File,
+      insertFn: InsertFnType
+    ) => {
       try {
         const formData = new FormData()
         formData.append(mergedUploadConfig.value.fieldName, file)
@@ -146,7 +171,7 @@
           url: props.uploadConfig?.server,
           data: formData,
           headers: {
-            'Content-Type':'multipart/form-data',
+            'Content-Type': 'multipart/form-data',
             Authorization: userStore.accessToken
           }
         })

@@ -14,6 +14,10 @@ class PaymentGroup extends Model
 
     public const ROUTE_MANUAL_BANK = 'MANUAL_BANK';
 
+    public const ROUTE_CUSTOMER_CREDIT = 'CUSTOMER_CREDIT';
+
+    public const METHOD_CUSTOMER_CREDIT = 'CUSTOMER_CREDIT';
+
     public const METHOD_BANK_TRANSFER = 'BANK_TRANSFER';
 
     public const METHOD_CHECK_DEPOSIT = 'CHECK_DEPOSIT';
@@ -40,7 +44,7 @@ class PaymentGroup extends Model
 
     protected $fillable = [
         'organization_id', 'customer_id', 'payment_policy_version_id', 'payment_policy_version_number',
-        'created_by_user_id', 'source_key', 'route', 'payment_method', 'check_clearance_status', 'status', 'currency', 'gross_selected_amount',
+        'created_by_user_id', 'source_key', 'route', 'payment_method', 'check_clearance_status', 'status', 'currency', 'gross_selected_amount', 'credit_applied_amount', 'cash_due_amount',
         'gateway_threshold_snapshot', 'manual_instructions_snapshot', 'manual_deadline_hours_snapshot',
         'review_target_hours_snapshot', 'clearance_target_hours_snapshot', 'correction_window_hours_snapshot',
         'instruction_issued_at', 'payment_deadline_at', 'review_due_at', 'clearance_due_at', 'correction_due_at', 'first_proof_submitted_at',
@@ -51,6 +55,8 @@ class PaymentGroup extends Model
     {
         return [
             'gross_selected_amount' => 'string',
+            'credit_applied_amount' => 'string',
+            'cash_due_amount' => 'string',
             'gateway_threshold_snapshot' => 'string',
             'manual_deadline_hours_snapshot' => 'integer',
             'review_target_hours_snapshot' => 'integer',
