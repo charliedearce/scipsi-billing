@@ -1,0 +1,18 @@
+:80 {
+    @socket path /app/* /apps/*
+    handle @socket {
+        reverse_proxy reverb:8080
+    }
+    @registration path /api/v1/auth/register /api/v1/auth/contact-verifications/*
+    handle @registration {
+        respond "Registration is disabled in staging." 403
+    }
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}

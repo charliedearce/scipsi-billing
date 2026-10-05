@@ -1,0 +1,84 @@
+# Staging only. Secrets and persistent data remain on the VPS outside Git.
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    environment:
+      POSTGRES_DB: scipsi_staging
+      POSTGRES_USER: scipsi_staging
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [postgres_data:/var/lib/postgresql]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U scipsi_staging -d scipsi_staging']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+  redis:
+    image: redis:8-alpine@sha256:978f0e01593e65eed801f2402944efcd936d43b5027e4908a7897baf88ed6241
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+  api:
+    image: scipsi-online-api:staging-git
+    build: ../apps/api
+    pull_policy: never
+    env_file: /root/scipsi-staging/staging.env
+    secrets: [postgres_password]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    volumes: [api_private_storage:/var/www/html/storage/app/private]
+    restart: unless-stopped
+  worker:
+    image: scipsi-online-api:staging-git
+    pull_policy: never
+    env_file: /root/scipsi-staging/staging.env
+    secrets: [postgres_password]
+    depends_on:
+      api: {condition: service_started}
+    volumes: [api_private_storage:/var/www/html/storage/app/private]
+    command: [php, artisan, queue:work, redis, --queue=default, --sleep=1, --tries=1, --timeout=120]
+    restart: unless-stopped
+  scheduler:
+    image: scipsi-online-api:staging-git
+    pull_policy: never
+    env_file: /root/scipsi-staging/staging.env
+    secrets: [postgres_password]
+    depends_on:
+      api: {condition: service_started}
+    command: [php, artisan, schedule:work]
+    restart: unless-stopped
+  reverb:
+    image: scipsi-online-api:staging-git
+    pull_policy: never
+    env_file: /root/scipsi-staging/staging.env
+    secrets: [postgres_password]
+    depends_on:
+      api: {condition: service_started}
+    command: [php, artisan, reverb:start, --host=0.0.0.0, --port=8080]
+    restart: unless-stopped
+  gateway:
+    build: ../apps/web
+    depends_on:
+      api: {condition: service_started}
+      reverb: {condition: service_started}
+    restart: unless-stopped
+secrets:
+  postgres_password:
+    file: /root/scipsi-staging/secrets/postgres_password
+volumes:
+  postgres_data:
+    external: true
+    name: v5txsjklyp7ejjfqivx9dmft_postgres-data
+  redis_data:
+    external: true
+    name: v5txsjklyp7ejjfqivx9dmft_redis-data
+  api_private_storage:
+    external: true
+    name: v5txsjklyp7ejjfqivx9dmft_api-private-storage
