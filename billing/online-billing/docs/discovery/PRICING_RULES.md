@@ -18,6 +18,8 @@ The online model makes each tariff version declare the following controlled clas
 
 Tariff code, description, unit, class, service/route rates and the three classifications belong in a draft/published `tariff_version` with explicit effective dates. A change creates a future version; it cannot alter an issued line or a historical report. Draft calculations show the selected versions and return a conflict/reconfirmation when an effective rule changes before posting.
 
+2026-10-05 archive rule: an Administrator may archive or restore a tariff master with a recorded reason. Archived tariffs remain in Admin history and retain their versions and invoice references. New draft tariff selection rejects them, and posting an existing draft with an archived tariff requires its affected line to be replaced first. Archiving does not cancel a draft, reverse an issued bill, or correct a wrong published rate; a rate correction requires a separately reviewed replacement version and non-overlapping effective window.
+
 ## Fuel price and surcharge schedule
 
 Admin Settings > **Tariffs & Surcharges** contains two separate records:
@@ -49,7 +51,7 @@ Candidate permissions are `tariffs.view/manage/publish`, `pricing_rules.view/man
 
 Logical records are `tariffs`, `tariff_versions`, `ppa_share_rule_versions`, `fuel_price_observations`, `fuel_surcharge_policy_versions`, `fuel_surcharge_bands`, `invoice_item_pricing_snapshots` and explicit `invoice_charge_components`. Use scoped foreign keys, effective-time/range indexes, explicit version references and protected deletion. The invoice remains the monetary authority; a reporting projection may be rebuilt but cannot recompute history from current tariff rules.
 
-Admin views show current/upcoming/retired tariff and fuel schedules, band boundaries, source freshness, affected tariff counts, preview calculations, conflict diagnostics and audit history. Customer and teller bill detail show the captured surcharge/PPA/tax result, not live policy values. Reverb silently refreshes authorized admin lists after publication/activation; it never broadcasts pricing data to unrelated customers.
+Admin views show current/upcoming/retired tariff and fuel schedules, band boundaries, source freshness, affected tariff counts, preview calculations, conflict diagnostics and audit history. Customer and teller bill detail show the captured surcharge/PPA/tax result, not live policy values. Reverb silently refreshes authorized admin lists after publication/activation; it never broadcasts pricing data to unrelated customers. A changed effective Fuel surcharge percentage additionally creates an IMPORTANT, Customer-role-only in-app announcement in the same transaction as the source change. The notice contains only old/new percentages and the future-bills boundary; the broadcast carries an announcement hint, and each customer refetches through the authorized announcement feed.
 
 ## Fixtures, phases and acceptance
 

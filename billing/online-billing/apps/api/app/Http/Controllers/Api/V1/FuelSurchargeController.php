@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\FuelPriceObservation;
 use App\Models\FuelSurchargeBand;
 use App\Models\FuelSurchargePolicyVersion;
+use App\Services\Announcement\FuelRateAnnouncementService;
 use App\Services\Audit\AuditEventService;
 use App\Services\Billing\PricingResolutionService;
 use Carbon\Carbon;
@@ -22,7 +23,8 @@ class FuelSurchargeController extends Controller
 {
     public function __construct(
         protected PricingResolutionService $pricingService,
-        protected AuditEventService $auditEvents
+        protected AuditEventService $auditEvents,
+        protected FuelRateAnnouncementService $fuelAnnouncements
     ) {}
 
     // -------------------------------------------------------------------------
@@ -89,35 +91,47 @@ class FuelSurchargeController extends Controller
             'reason' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $observation = FuelPriceObservation::create([
-            'organization_id' => $user->organization_id,
-            'product_grade' => $validated['product_grade'] ?? 'DIESEL',
-            'price' => (string) $validated['price'],
-            'currency' => $validated['currency'] ?? 'PHP',
-            'unit_of_measure' => $validated['unit_of_measure'] ?? 'LITER',
-            'observed_at' => Carbon::parse($validated['observed_at'], 'Asia/Manila'),
-            'effective_at' => Carbon::parse($validated['effective_at'], 'Asia/Manila'),
-            'status' => 'active',
-            'entered_by_user_id' => $user->id,
-            'notes' => $validated['notes'] ?? null,
-            'scope_key' => $validated['scope_key'] ?? 'ORGANIZATION',
-            'source_reference' => $validated['source_reference'] ?? null,
-            'source_evidence_ref' => $validated['source_evidence_ref'] ?? null,
-            'lock_version' => 1,
-        ]);
+        $at = Carbon::now('Asia/Manila');
+        $observation = DB::transaction(function () use ($user, $validated, $request, $at) {
+            $beforeRate = $this->fuelAnnouncements->currentRate($user->organization_id, $at);
+            $observation = FuelPriceObservation::create([
+                'organization_id' => $user->organization_id,
+                'product_grade' => $validated['product_grade'] ?? 'DIESEL',
+                'price' => (string) $validated['price'],
+                'currency' => $validated['currency'] ?? 'PHP',
+                'unit_of_measure' => $validated['unit_of_measure'] ?? 'LITER',
+                'observed_at' => Carbon::parse($validated['observed_at'], 'Asia/Manila'),
+                'effective_at' => Carbon::parse($validated['effective_at'], 'Asia/Manila'),
+                'status' => 'active',
+                'entered_by_user_id' => $user->id,
+                'notes' => $validated['notes'] ?? null,
+                'scope_key' => $validated['scope_key'] ?? 'ORGANIZATION',
+                'source_reference' => $validated['source_reference'] ?? null,
+                'source_evidence_ref' => $validated['source_evidence_ref'] ?? null,
+                'lock_version' => 1,
+            ]);
 
-        $this->auditEvents->recordEvent(
-            organizationId: $user->organization_id,
-            locationId: null,
-            eventType: 'FUEL_PRICE_OBSERVATION_CREATED',
-            aggregateType: 'FUEL_PRICE_OBSERVATION',
-            aggregateId: $observation->id,
-            aggregateVersion: $observation->lock_version,
-            actor: $user,
-            reason: $validated['reason'] ?? 'Fuel price observation recorded',
-            afterSnapshot: $observation->load(['enteredBy', 'reviewedBy'])->toArray(),
-            request: $request
-        );
+            $this->auditEvents->recordEvent(
+                organizationId: $user->organization_id,
+                locationId: null,
+                eventType: 'FUEL_PRICE_OBSERVATION_CREATED',
+                aggregateType: 'FUEL_PRICE_OBSERVATION',
+                aggregateId: $observation->id,
+                aggregateVersion: $observation->lock_version,
+                actor: $user,
+                reason: $validated['reason'] ?? 'Fuel price observation recorded',
+                afterSnapshot: $observation->load(['enteredBy', 'reviewedBy'])->toArray(),
+                request: $request
+            );
+
+            $this->fuelAnnouncements->announceChange(
+                $user,
+                $beforeRate,
+                $this->fuelAnnouncements->currentRate($user->organization_id, $at)
+            );
+
+            return $observation;
+        });
 
         broadcast(new DataRefreshEvent($user->organization_id, 'fuel_surcharges', 'fuel_price_observation', $observation->id, 'created'));
 
@@ -149,25 +163,35 @@ class FuelSurchargeController extends Controller
             ], 409);
         }
 
-        $before = $observation->toArray();
-        $observation->update([
-            'status' => 'retired',
-            'lock_version' => $observation->lock_version + 1,
-        ]);
+        $at = Carbon::now('Asia/Manila');
+        DB::transaction(function () use ($observation, $orgId, $validated, $request, $at) {
+            $beforeRate = $this->fuelAnnouncements->currentRate($orgId, $at);
+            $before = $observation->toArray();
+            $observation->update([
+                'status' => 'retired',
+                'lock_version' => $observation->lock_version + 1,
+            ]);
 
-        $this->auditEvents->recordEvent(
-            organizationId: $orgId,
-            locationId: null,
-            eventType: 'FUEL_PRICE_OBSERVATION_RETIRED',
-            aggregateType: 'FUEL_PRICE_OBSERVATION',
-            aggregateId: $observation->id,
-            aggregateVersion: $observation->lock_version,
-            actor: $request->user(),
-            reason: $validated['reason'] ?? 'Fuel price observation retired',
-            beforeSnapshot: $before,
-            afterSnapshot: $observation->fresh()->toArray(),
-            request: $request
-        );
+            $this->auditEvents->recordEvent(
+                organizationId: $orgId,
+                locationId: null,
+                eventType: 'FUEL_PRICE_OBSERVATION_RETIRED',
+                aggregateType: 'FUEL_PRICE_OBSERVATION',
+                aggregateId: $observation->id,
+                aggregateVersion: $observation->lock_version,
+                actor: $request->user(),
+                reason: $validated['reason'] ?? 'Fuel price observation retired',
+                beforeSnapshot: $before,
+                afterSnapshot: $observation->fresh()->toArray(),
+                request: $request
+            );
+
+            $this->fuelAnnouncements->announceChange(
+                $request->user(),
+                $beforeRate,
+                $this->fuelAnnouncements->currentRate($orgId, $at)
+            );
+        });
 
         broadcast(new DataRefreshEvent($orgId, 'fuel_surcharges', 'fuel_price_observation', $observation->id, 'retired'));
 
@@ -262,7 +286,9 @@ class FuelSurchargeController extends Controller
 
         $nextVersion = ((int) FuelSurchargePolicyVersion::where('organization_id', $user->organization_id)->max('version_number')) + 1;
 
-        $policy = DB::transaction(function () use ($user, $validated, $nextVersion, $effectiveFrom, $effectiveTo, $status) {
+        $at = Carbon::now('Asia/Manila');
+        $policy = DB::transaction(function () use ($user, $validated, $nextVersion, $effectiveFrom, $effectiveTo, $status, $request, $at) {
+            $beforeRate = $this->fuelAnnouncements->currentRate($user->organization_id, $at);
             $policy = FuelSurchargePolicyVersion::create([
                 'organization_id' => $user->organization_id,
                 'version_number' => $nextVersion,
@@ -292,21 +318,27 @@ class FuelSurchargeController extends Controller
                 ]);
             }
 
+            $this->auditEvents->recordEvent(
+                organizationId: $user->organization_id,
+                locationId: null,
+                eventType: 'FUEL_SURCHARGE_POLICY_CREATED',
+                aggregateType: 'FUEL_SURCHARGE_POLICY',
+                aggregateId: $policy->id,
+                aggregateVersion: $policy->lock_version,
+                actor: $user,
+                reason: $validated['reason'] ?? 'Fuel surcharge policy created',
+                afterSnapshot: $policy->load(['bands', 'createdBy'])->toArray(),
+                request: $request
+            );
+
+            $this->fuelAnnouncements->announceChange(
+                $user,
+                $beforeRate,
+                $this->fuelAnnouncements->currentRate($user->organization_id, $at)
+            );
+
             return $policy;
         });
-
-        $this->auditEvents->recordEvent(
-            organizationId: $user->organization_id,
-            locationId: null,
-            eventType: 'FUEL_SURCHARGE_POLICY_CREATED',
-            aggregateType: 'FUEL_SURCHARGE_POLICY',
-            aggregateId: $policy->id,
-            aggregateVersion: $policy->lock_version,
-            actor: $user,
-            reason: $validated['reason'] ?? 'Fuel surcharge policy created',
-            afterSnapshot: $policy->load(['bands', 'createdBy'])->toArray(),
-            request: $request
-        );
 
         broadcast(new DataRefreshEvent($user->organization_id, 'fuel_surcharges', 'fuel_surcharge_policy', $policy->id, 'created'));
 
@@ -340,8 +372,6 @@ class FuelSurchargeController extends Controller
             ], 409);
         }
 
-        $before = $policy->toArray();
-
         $bandsArray = $policy->bands->map(fn ($b) => [
             'min_price' => $b->min_price,
             'max_price' => $b->max_price,
@@ -359,25 +389,35 @@ class FuelSurchargeController extends Controller
         $now = Carbon::now('Asia/Manila');
         $newStatus = $effectiveFrom->lessThanOrEqualTo($now) ? 'effective' : 'published';
 
-        $policy->update([
-            'status' => $newStatus,
-            'lock_version' => $policy->lock_version + 1,
-            'publication_reason' => $validated['reason'] ?? $policy->publication_reason ?? 'Fuel surcharge policy published',
-        ]);
+        DB::transaction(function () use ($policy, $user, $validated, $newStatus, $request, $now) {
+            $beforeRate = $this->fuelAnnouncements->currentRate($user->organization_id, $now);
+            $before = $policy->toArray();
+            $policy->update([
+                'status' => $newStatus,
+                'lock_version' => $policy->lock_version + 1,
+                'publication_reason' => $validated['reason'] ?? $policy->publication_reason ?? 'Fuel surcharge policy published',
+            ]);
 
-        $this->auditEvents->recordEvent(
-            organizationId: $user->organization_id,
-            locationId: null,
-            eventType: 'FUEL_SURCHARGE_POLICY_PUBLISHED',
-            aggregateType: 'FUEL_SURCHARGE_POLICY',
-            aggregateId: $policy->id,
-            aggregateVersion: $policy->lock_version,
-            actor: $user,
-            reason: $validated['reason'] ?? 'Fuel surcharge policy published',
-            beforeSnapshot: $before,
-            afterSnapshot: $policy->fresh(['bands', 'createdBy'])->toArray(),
-            request: $request
-        );
+            $this->auditEvents->recordEvent(
+                organizationId: $user->organization_id,
+                locationId: null,
+                eventType: 'FUEL_SURCHARGE_POLICY_PUBLISHED',
+                aggregateType: 'FUEL_SURCHARGE_POLICY',
+                aggregateId: $policy->id,
+                aggregateVersion: $policy->lock_version,
+                actor: $user,
+                reason: $validated['reason'] ?? 'Fuel surcharge policy published',
+                beforeSnapshot: $before,
+                afterSnapshot: $policy->fresh(['bands', 'createdBy'])->toArray(),
+                request: $request
+            );
+
+            $this->fuelAnnouncements->announceChange(
+                $user,
+                $beforeRate,
+                $this->fuelAnnouncements->currentRate($user->organization_id, $now)
+            );
+        });
 
         broadcast(new DataRefreshEvent($user->organization_id, 'fuel_surcharges', 'fuel_surcharge_policy', $policy->id, 'published'));
 

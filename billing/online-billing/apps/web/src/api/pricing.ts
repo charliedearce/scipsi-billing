@@ -122,6 +122,13 @@ export function createTariff(data: TariffCreatePayload) {
   })
 }
 
+export function updateTariff(id: number, data: { is_active: boolean; reason: string }) {
+  return request.put<Tariff>({
+    url: `/api/v1/admin/tariffs/${id}`,
+    data
+  })
+}
+
 export function createTariffVersion(tariffId: number, data: TariffVersionPayload) {
   return request.post<TariffVersion>({
     url: `/api/v1/admin/tariffs/${tariffId}/versions`,

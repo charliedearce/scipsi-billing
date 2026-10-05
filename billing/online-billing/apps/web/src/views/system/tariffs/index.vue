@@ -38,6 +38,7 @@
               <div class="text-sm text-g-500">
                 {{ groupedTariffs.length }} cargo codes · {{ filteredTariffs.length }} rate cells
               </div>
+              <ElSwitch v-model="showArchived" active-text="Archived only" />
             </div>
             <ElButton type="primary" @click="showTariffDialog = true">New Tariff</ElButton>
           </div>
@@ -49,7 +50,11 @@
             border
             row-key="tariff_code"
             :expand-row-keys="expandedCodes"
-            empty-text="No tariffs match this search."
+            :empty-text="
+              showArchived
+                ? 'No archived tariffs match this search.'
+                : 'No active tariffs match this search.'
+            "
             @expand-change="onGroupExpand"
           >
             <ElTableColumn type="expand" width="48">
@@ -94,7 +99,14 @@
                         <span v-else class="text-g-400">None</span>
                       </template>
                     </ElTableColumn>
-                    <ElTableColumn label="Actions" width="200" fixed="right">
+                    <ElTableColumn label="Status" width="100">
+                      <template #default="{ row: cell }">
+                        <ElTag size="small" :type="cell.is_active ? 'success' : 'info'">
+                          {{ cell.is_active ? 'Active' : 'Archived' }}
+                        </ElTag>
+                      </template>
+                    </ElTableColumn>
+                    <ElTableColumn label="Actions" width="265" fixed="right">
                       <template #default="{ row: cell }">
                         <ElButton
                           size="small"
@@ -104,8 +116,22 @@
                         >
                           View rate
                         </ElButton>
-                        <ElButton size="small" link @click.stop="openVersionDialog(cell)">
+                        <ElButton
+                          v-if="cell.is_active"
+                          size="small"
+                          link
+                          @click.stop="openVersionDialog(cell)"
+                        >
                           Add version
+                        </ElButton>
+                        <ElButton
+                          size="small"
+                          link
+                          :type="cell.is_active ? 'danger' : 'success'"
+                          :loading="changingTariffId === cell.id"
+                          @click.stop="changeTariffAvailability(cell)"
+                        >
+                          {{ cell.is_active ? 'Archive' : 'Restore' }}
                         </ElButton>
                       </template>
                     </ElTableColumn>
@@ -192,7 +218,12 @@
                     }}</ElTag></template
                   >
                 </ElTableColumn>
-                <ElTableColumn label="Action" width="100">
+                <ElTableColumn
+                  label="Action"
+                  width="100"
+                  class-name="mobile-table-actions"
+                  label-class-name="mobile-table-actions"
+                >
                   <template #default="{ row }">
                     <ElButton
                       v-if="row.status === 'active'"
@@ -248,7 +279,12 @@
                     </div>
                   </template>
                 </ElTableColumn>
-                <ElTableColumn label="Action" width="110">
+                <ElTableColumn
+                  label="Action"
+                  width="110"
+                  class-name="mobile-table-actions"
+                  label-class-name="mobile-table-actions"
+                >
                   <template #default="{ row }">
                     <ElButton
                       v-if="row.status === 'draft'"
@@ -286,8 +322,9 @@
                 {{ selectedTariff.unit_of_measure }}
               </p>
             </div>
+            <ElTag v-if="!selectedTariff.is_active" size="small" type="info">Archived</ElTag>
             <ElTag
-              v-if="selectedCurrentVersion"
+              v-else-if="selectedCurrentVersion"
               size="small"
               :type="statusType(selectedCurrentVersion.status)"
             >
@@ -342,7 +379,12 @@
         <div>
           <div class="mb-2 flex items-center justify-between gap-2">
             <h3 class="text-sm font-semibold text-g-800">Version history</h3>
-            <ElButton size="small" type="primary" @click="openVersionDialog(selectedTariff)">
+            <ElButton
+              v-if="selectedTariff.is_active"
+              size="small"
+              type="primary"
+              @click="openVersionDialog(selectedTariff)"
+            >
               Add version
             </ElButton>
           </div>
@@ -379,7 +421,12 @@
                 · Fuel {{ row.fuel_surcharge_applicability === 'APPLICABLE' ? 'Yes' : 'No' }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Action" width="110">
+            <ElTableColumn
+              label="Action"
+              width="110"
+              class-name="mobile-table-actions"
+              label-class-name="mobile-table-actions"
+            >
               <template #default="{ row }">
                 <ElButton
                   v-if="row.status === 'draft'"
@@ -615,6 +662,7 @@
     publishFuelPolicy,
     publishTariffVersion,
     retireFuelObservation,
+    updateTariff,
     type FuelObservationPayload,
     type FuelPriceObservation,
     type FuelSurchargePolicy,
@@ -642,6 +690,7 @@
   const loadingTariffs = ref(false)
   const loadingFuel = ref(false)
   const saving = ref(false)
+  const changingTariffId = ref<number | null>(null)
   const tariffs = ref<Tariff[]>([])
   const observations = ref<FuelPriceObservation[]>([])
   const policies = ref<FuelSurchargePolicy[]>([])
@@ -653,16 +702,20 @@
   const showPolicyDialog = ref(false)
   const selectedTariff = ref<Tariff | null>(null)
   const tariffSearch = ref('')
+  const showArchived = ref(false)
   const cataloguePage = ref(1)
   const cataloguePageSize = ref(20)
   const expandedCodes = ref<string[]>([])
 
   const filteredTariffs = computed(() => {
     const query = tariffSearch.value.trim().toLowerCase()
+    const visible = tariffs.value.filter((tariff) =>
+      showArchived.value ? !tariff.is_active : tariff.is_active
+    )
     if (!query) {
-      return tariffs.value
+      return visible
     }
-    return tariffs.value.filter((tariff) => {
+    return visible.filter((tariff) => {
       const haystack = [
         tariff.tariff_code,
         tariff.name,
@@ -685,7 +738,7 @@
     return groupedTariffs.value.slice(start, start + cataloguePageSize.value)
   })
 
-  watch(tariffSearch, () => {
+  watch([tariffSearch, showArchived], () => {
     cataloguePage.value = 1
   })
 
@@ -907,6 +960,39 @@
       ElMessage.error(error?.message || 'Failed to create tariff')
     } finally {
       saving.value = false
+    }
+  }
+
+  async function changeTariffAvailability(tariff: Tariff) {
+    const action = tariff.is_active ? 'Archive' : 'Restore'
+    let reason: string
+    try {
+      const { value } = await ElMessageBox.prompt(
+        tariff.is_active
+          ? 'This tariff will be unavailable for new bills. Existing invoices keep their recorded rates.'
+          : 'Review the published rate before making this tariff available for new bills again.',
+        `${action} ${tariff.tariff_code}`,
+        {
+          type: 'warning',
+          confirmButtonText: action,
+          inputPlaceholder: `Reason to ${action.toLowerCase()}`,
+          inputValidator: (input) => input.trim().length > 0 || 'A reason is required.'
+        }
+      )
+      reason = value.trim()
+    } catch {
+      return
+    }
+
+    changingTariffId.value = tariff.id
+    try {
+      await updateTariff(tariff.id, { is_active: !tariff.is_active, reason })
+      await loadTariffs()
+      ElMessage.success(`Tariff ${tariff.is_active ? 'archived' : 'restored'}`)
+    } catch (error: any) {
+      ElMessage.error(error?.message || `Failed to ${action.toLowerCase()} tariff`)
+    } finally {
+      changingTariffId.value = null
     }
   }
 

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Billing;
 
+use App\Models\Announcement;
 use App\Models\BuyerProfileVersion;
 use App\Models\Customer;
 use App\Models\CustomerBuyerProfile;
@@ -14,6 +15,7 @@ use App\Models\Role;
 use App\Models\Tariff;
 use App\Models\TariffVersion;
 use App\Models\User;
+use App\Services\Audit\AuditEventService;
 use App\Services\Billing\InvoiceDraftService;
 use App\Services\Billing\InvoicePostingService;
 use App\Services\Billing\PricingResolutionService;
@@ -140,6 +142,119 @@ class TariffAndFuelSurchargeTest extends TestCase
             ->assertJsonPath('data.rate', '250.0000')
             ->assertJsonPath('data.version_number', 1)
             ->assertJsonPath('data.fuel_surcharge_applicability', 'APPLICABLE');
+    }
+
+    public function test_archiving_tariff_requires_reason_and_blocks_new_drafts_without_erasing_history(): void
+    {
+        $tariff = Tariff::where('organization_id', $this->org->id)
+            ->where('tariff_code', 'ARR_DOM')
+            ->where('service_type', 'ARRASTRE')
+            ->firstOrFail();
+        $version = $tariff->versions()->where('status', 'effective')->firstOrFail();
+        $draftInput = [
+            'customer_id' => $this->customer->id,
+            'business_date' => now('Asia/Manila')->toDateString(),
+            'surcharge_mode' => 'NONE',
+            'items' => [['tariff_version_id' => $version->id, 'quantity' => '1']],
+        ];
+
+        $originalRate = $this->draftService->calculateDraft($this->org->id, $draftInput)['items'][0]['unit_rate'];
+
+        $this->actingAs($this->admin)
+            ->putJson("/api/v1/admin/tariffs/{$tariff->id}", ['is_active' => false])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['reason']);
+
+        $this->actingAs($this->admin)
+            ->putJson("/api/v1/admin/tariffs/{$tariff->id}", [
+                'is_active' => false,
+                'reason' => 'Published rate requires review.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.is_active', false);
+
+        $this->actingAs($this->admin)
+            ->getJson('/api/v1/admin/tariffs')
+            ->assertOk()
+            ->assertSeeText('ARR_DOM');
+        $this->actingAs($this->teller)
+            ->getJson('/api/v1/tariffs')
+            ->assertOk()
+            ->assertDontSeeText('ARR_DOM');
+        $this->assertDatabaseHas('tariff_versions', ['id' => $version->id, 'tariff_id' => $tariff->id]);
+        $this->assertDatabaseHas('audit_events', [
+            'event_type' => 'TARIFF_UPDATED',
+            'aggregate_type' => 'TARIFF',
+            'aggregate_id' => $tariff->id,
+            'reason' => 'Published rate requires review.',
+        ]);
+
+        foreach ([['tariff_code' => 'ARR_DOM'], ['tariff_version_id' => $version->id]] as $selector) {
+            try {
+                $this->draftService->calculateDraft($this->org->id, [
+                    ...$draftInput,
+                    'items' => [$selector + ['quantity' => '1']],
+                ]);
+                $this->fail('Archived tariff was accepted for a new draft.');
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('tariff', $exception->errors());
+            }
+        }
+
+        $this->actingAs($this->admin)
+            ->putJson("/api/v1/admin/tariffs/{$tariff->id}", [
+                'is_active' => true,
+                'reason' => 'Corrected and reviewed for future bills.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.is_active', true);
+        $this->assertSame($originalRate, $this->draftService->calculateDraft($this->org->id, $draftInput)['items'][0]['unit_rate']);
+    }
+
+    public function test_tariff_archive_rolls_back_if_audit_record_cannot_be_saved(): void
+    {
+        $tariff = Tariff::where('organization_id', $this->org->id)
+            ->where('tariff_code', 'ARR_DOM')
+            ->firstOrFail();
+
+        $audit = \Mockery::mock(AuditEventService::class);
+        $audit->shouldReceive('recordEvent')->once()->andThrow(new \RuntimeException('Audit unavailable'));
+        $this->app->instance(AuditEventService::class, $audit);
+
+        $this->actingAs($this->admin)
+            ->putJson("/api/v1/admin/tariffs/{$tariff->id}", [
+                'is_active' => false,
+                'reason' => 'Incorrect published rate.',
+            ])
+            ->assertStatus(500);
+
+        $this->assertTrue($tariff->fresh()->is_active);
+    }
+
+    public function test_saved_draft_cannot_post_after_its_tariff_is_archived(): void
+    {
+        $draft = $this->draftService->createDraft($this->org->id, null, $this->teller, [
+            'customer_id' => $this->customer->id,
+            'business_date' => Carbon::now('Asia/Manila')->toDateString(),
+            'due_date' => Carbon::now('Asia/Manila')->addDays(30)->toDateString(),
+            ...$this->invoiceShipmentPayload($this->org->id),
+            'items' => [['tariff_code' => 'ARR_DOM', 'quantity' => '1']],
+        ]);
+        $tariffId = $draft->items()->firstOrFail()->tariffVersion->tariff_id;
+
+        $this->actingAs($this->admin)
+            ->putJson("/api/v1/admin/tariffs/{$tariffId}", [
+                'is_active' => false,
+                'reason' => 'Rate requires review before billing.',
+            ])->assertOk();
+
+        try {
+            $this->postingService->postInvoice($draft, $this->teller, $draft->lock_version);
+            $this->fail('A draft using an archived tariff was posted.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('items', $exception->errors());
+        }
+        $this->assertSame('DRAFT', $draft->fresh()->status);
     }
 
     /** @test */
@@ -306,6 +421,71 @@ class TariffAndFuelSurchargeTest extends TestCase
         $response->assertStatus(201)
             ->assertJsonPath('data.basis', 'BASE_TARIFF_AMOUNT')
             ->assertJsonCount(3, 'data.bands');
+    }
+
+    public function test_applied_fuel_rate_changes_publish_customer_only_announcements(): void
+    {
+        $this->assertSame(0, Announcement::count());
+
+        $changedAt = now('Asia/Manila')->subMinute()->toDateTimeString();
+        $changed = $this->actingAs($this->admin)->postJson('/api/v1/admin/fuel/observations', [
+            'price' => '75.0000',
+            'observed_at' => $changedAt,
+            'effective_at' => $changedAt,
+        ])->assertCreated();
+
+        $this->assertSame(1, Announcement::count());
+        $notice = Announcement::firstOrFail();
+        $this->assertSame(['Customer'], $notice->currentVersion->roles->pluck('name')->all());
+        $this->actingAs($this->customerUser)->getJson('/api/v1/announcements/active')
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.severity', 'IMPORTANT')
+            ->assertSeeText('5.00% to 10.00%');
+        $this->actingAs($this->admin)->getJson('/api/v1/announcements/active')
+            ->assertOk()->assertJsonPath('total', 0);
+
+        $sameBandAt = now('Asia/Manila')->subSeconds(30)->toDateTimeString();
+        $sameBand = $this->actingAs($this->admin)->postJson('/api/v1/admin/fuel/observations', [
+            'price' => '76.0000',
+            'observed_at' => $sameBandAt,
+            'effective_at' => $sameBandAt,
+        ])->assertCreated();
+        $this->assertSame(1, Announcement::count());
+
+        $this->actingAs($this->admin)->postJson('/api/v1/admin/fuel/observations/'.$sameBand->json('data.id').'/retire')
+            ->assertOk();
+        $this->assertSame(1, Announcement::count());
+
+        $this->actingAs($this->admin)->postJson('/api/v1/admin/fuel/observations/'.$changed->json('data.id').'/retire')
+            ->assertOk();
+        $this->assertSame(2, Announcement::count());
+        $this->assertStringContainsString('10.00% to 5.00%', Announcement::latest('id')->firstOrFail()->currentVersion->body);
+    }
+
+    public function test_publishing_a_changed_current_fuel_schedule_announces_but_drafting_does_not(): void
+    {
+        FuelSurchargePolicyVersion::where('organization_id', $this->org->id)
+            ->where('status', 'effective')
+            ->firstOrFail()
+            ->update(['effective_to' => now('Asia/Manila')->subHours(13)]);
+
+        $draft = $this->actingAs($this->admin)->postJson('/api/v1/admin/fuel/policies', [
+            'effective_from' => now('Asia/Manila')->subHours(12)->toDateTimeString(),
+            'status' => 'draft',
+            'bands' => [
+                ['min_price' => '0', 'max_price' => '70', 'surcharge_percent' => '0.1000', 'label' => '10%'],
+                ['min_price' => '70', 'max_price' => null, 'surcharge_percent' => '0.2000', 'label' => '20%'],
+            ],
+        ])->assertCreated();
+
+        $this->assertSame(0, Announcement::count());
+
+        $this->actingAs($this->admin)->postJson('/api/v1/admin/fuel/policies/'.$draft->json('data.id').'/publish')
+            ->assertOk()->assertJsonPath('data.status', 'effective');
+
+        $this->assertSame(1, Announcement::count());
+        $this->assertStringContainsString('5.00% to 10.00%', Announcement::firstOrFail()->currentVersion->body);
     }
 
     /** @test */
@@ -701,7 +881,7 @@ class TariffAndFuelSurchargeTest extends TestCase
         // 1. Create and post an invoice
         $draft = $this->draftService->createDraft($this->org->id, null, $this->teller, [
             'customer_id' => $this->customer->id,
-            'business_date' => Carbon::now()->toDateString(),
+            'business_date' => Carbon::now('Asia/Manila')->toDateString(),
             'due_date' => Carbon::now()->addDays(30)->toDateString(),
             'description' => 'Original Invoice Before Policy Change',
             ...$this->invoiceShipmentPayload($this->org->id),
@@ -722,6 +902,12 @@ class TariffAndFuelSurchargeTest extends TestCase
         // 2. Modify active tariff rate: update ARR_DOM version to double the rate
         $arrVersion = TariffVersion::where('id', $postedInvoice->items->first()->tariff_version_id)->first();
         $arrVersion->update(['rate' => '500.0000']);
+        $this->actingAs($this->admin)
+            ->putJson("/api/v1/admin/tariffs/{$arrVersion->tariff_id}", [
+                'is_active' => false,
+                'reason' => 'Rate withdrawn for review.',
+            ])
+            ->assertOk();
 
         // 3. Modify active fuel observation price to skyrocket
         FuelPriceObservation::where('organization_id', $this->org->id)->update(['price' => '250.0000']);

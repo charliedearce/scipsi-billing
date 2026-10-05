@@ -493,6 +493,12 @@ class InvoiceDraftService
                 ]);
             }
 
+            if (! $version->tariff->is_active) {
+                throw ValidationException::withMessages([
+                    'tariff' => ["Tariff [{$version->tariff->tariff_code}] is archived and cannot be used for a new draft."],
+                ]);
+            }
+
             return $version;
         }
 

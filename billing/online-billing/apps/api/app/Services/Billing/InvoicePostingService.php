@@ -7,6 +7,7 @@ use App\Models\AuditEvent;
 use App\Models\DocumentSeries;
 use App\Models\Invoice;
 use App\Models\InvoiceOutbox;
+use App\Models\Tariff;
 use App\Models\User;
 use App\Services\Audit\DocumentRevisionService;
 use Carbon\Carbon;
@@ -62,6 +63,17 @@ class InvoicePostingService
 
             if ($lockedInvoice->lock_version !== $expectedVersion) {
                 throw new ConcurrencyException("Invoice posting conflict: current version is {$lockedInvoice->lock_version}, expected {$expectedVersion}.");
+            }
+
+            $tariffIds = $lockedInvoice->items()->with('tariffVersion:id,tariff_id')->get()
+                ->pluck('tariffVersion.tariff_id')->unique()->values();
+            $tariffs = Tariff::whereIn('id', $tariffIds)->orderBy('id')->lockForUpdate()->get();
+            foreach ($tariffs as $tariff) {
+                if (! $tariff->is_active) {
+                    throw ValidationException::withMessages([
+                        'items' => ["Tariff [{$tariff->tariff_code}] was archived. Replace that draft line before posting."],
+                    ]);
+                }
             }
 
             // Repair drafts whose document_revisions lagged invoice.lock_version

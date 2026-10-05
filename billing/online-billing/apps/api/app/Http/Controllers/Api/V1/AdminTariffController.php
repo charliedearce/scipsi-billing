@@ -11,6 +11,7 @@ use App\Services\Billing\PricingResolutionService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -119,24 +120,26 @@ class AdminTariffController extends Controller
             'name' => ['sometimes', 'string', 'max:255'],
             'unit_of_measure' => ['sometimes', 'string', 'max:32'],
             'is_active' => ['sometimes', 'boolean'],
-            'reason' => ['nullable', 'string', 'max:500'],
+            'reason' => [Rule::requiredIf(fn () => $request->has('is_active') && $request->boolean('is_active') !== $tariff->is_active), 'nullable', 'string', 'max:500'],
         ]);
 
-        $tariff->update($validated);
+        DB::transaction(function () use ($tariff, $validated, $orgId, $before, $request): void {
+            $tariff->update($validated);
 
-        $this->auditEvents->recordEvent(
-            organizationId: $orgId,
-            locationId: null,
-            eventType: 'TARIFF_UPDATED',
-            aggregateType: 'TARIFF',
-            aggregateId: $tariff->id,
-            aggregateVersion: 1,
-            actor: $request->user(),
-            reason: $request->input('reason', 'Tariff master updated'),
-            beforeSnapshot: $before,
-            afterSnapshot: $tariff->fresh()->toArray(),
-            request: $request
-        );
+            $this->auditEvents->recordEvent(
+                organizationId: $orgId,
+                locationId: null,
+                eventType: 'TARIFF_UPDATED',
+                aggregateType: 'TARIFF',
+                aggregateId: $tariff->id,
+                aggregateVersion: 1,
+                actor: $request->user(),
+                reason: $validated['reason'] ?? 'Tariff master updated',
+                beforeSnapshot: $before,
+                afterSnapshot: $tariff->fresh()->toArray(),
+                request: $request
+            );
+        });
 
         broadcast(new DataRefreshEvent($orgId, 'tariffs', 'tariff', $tariff->id, 'updated'));
 
