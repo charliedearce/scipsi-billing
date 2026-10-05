@@ -5,7 +5,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
 ENV VITE_VERSION=3.0.2 VITE_BASE_URL=/ VITE_API_URL=/
-RUN pnpm build
+RUN pnpm exec vite build && pnpm exec vue-tsc --noEmit
 
 FROM caddy:2.10-alpine
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
