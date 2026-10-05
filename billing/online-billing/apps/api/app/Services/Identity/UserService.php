@@ -23,6 +23,7 @@ class UserService
             }
 
             $roleIds = $data['role_ids'] ?? [];
+            $this->ensureRolesInOrganization($roleIds, $orgId);
             if (! empty($roleIds) && $actor && ! $actor->hasRole('Administrator')) {
                 $hasAdminRole = Role::whereIn('id', $roleIds)->where('name', 'Administrator')->exists();
                 if ($hasAdminRole) {
@@ -81,6 +82,7 @@ class UserService
             // Role updates and privilege escalation checks
             if (isset($data['role_ids'])) {
                 $newRoleIds = $data['role_ids'];
+                $this->ensureRolesInOrganization($newRoleIds, $user->organization_id);
                 if ($actor && ! $actor->hasRole('Administrator')) {
                     $hasAdminRole = Role::whereIn('id', $newRoleIds)->where('name', 'Administrator')->exists();
                     if ($hasAdminRole) {
@@ -224,6 +226,19 @@ class UserService
             if ($activeAdminCount <= 1) {
                 throw new LastAdminException('Cannot modify or suspend the last active administrator for this organization.');
             }
+        }
+    }
+
+    private function ensureRolesInOrganization(array $roleIds, ?int $organizationId): void
+    {
+        if ($roleIds === []) {
+            return;
+        }
+        $available = Role::whereIn('id', $roleIds)
+            ->where(fn ($query) => $query->whereNull('organization_id')->orWhere('organization_id', $organizationId))
+            ->count();
+        if ($available !== count(array_unique($roleIds))) {
+            throw new PrivilegeEscalationException('Cannot assign a role from another organization.');
         }
     }
 }

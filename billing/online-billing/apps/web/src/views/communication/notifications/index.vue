@@ -471,9 +471,8 @@
 
   function billClaimDestination(): string {
     const roles = Array.isArray(userStore.info?.roles) ? userStore.info.roles.map(String) : []
-    if (roles.includes('Teller') || roles.includes('Administrator')) {
-      return '/bill-claim-review'
-    }
+    if (roles.includes('Teller')) return '/bill-claim-review'
+    if (roles.includes('Administrator')) return '/notifications'
     const permissions = (userStore.info as any)?.permissions
     if (Array.isArray(permissions) && permissions.includes('bill_claims:review')) {
       return '/bill-claim-review'

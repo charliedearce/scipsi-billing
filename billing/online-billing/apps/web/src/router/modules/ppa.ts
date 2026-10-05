@@ -11,7 +11,7 @@ export const ppaRoutes: AppRouteRecord = {
   meta: {
     title: 'PPA',
     icon: 'ri:ship-line',
-    roles: ['PPA user', 'Administrator'],
+    roles: ['PPA user'],
     absoluteChildPaths: true
   },
   children: [
@@ -25,7 +25,7 @@ export const ppaRoutes: AppRouteRecord = {
           'Look up a bill or official receipt to confirm it was issued and whether it is paid. Read-only; it never posts money or releases cargo.',
         icon: 'ri:shield-check-line',
         keepAlive: true,
-        roles: ['PPA user', 'Administrator']
+        roles: ['PPA user']
       }
     },
     {
@@ -38,7 +38,7 @@ export const ppaRoutes: AppRouteRecord = {
           'Fully paid bills in a date range with the PPA share stored on each bill and the receipts that settled them. Defaults to the current month; widen the range to see earlier bills.',
         icon: 'ri:pie-chart-2-line',
         keepAlive: true,
-        roles: ['PPA user', 'Administrator']
+        roles: ['PPA user']
       }
     }
   ]

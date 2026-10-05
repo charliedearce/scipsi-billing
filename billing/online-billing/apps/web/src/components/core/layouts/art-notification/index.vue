@@ -152,13 +152,16 @@
 
   function canReviewBillClaims(): boolean {
     const roles = userRoles()
-    if (roles.some((role) => role === 'Teller' || role === 'Administrator')) return true
+    if (roles.includes('Teller')) return true
+    if (roles.includes('Administrator')) return false
     const permissions = (userStore.info as any)?.permissions
     return Array.isArray(permissions) && permissions.includes('bill_claims:review')
   }
 
   function billClaimDestination(): string {
-    return canReviewBillClaims() ? '/bill-claim-review' : '/claim-bill'
+    if (canReviewBillClaims()) return '/bill-claim-review'
+    if (userRoles().includes('Administrator')) return '/notifications'
+    return '/claim-bill'
   }
 
   function formatTime(iso?: string | null): string {
@@ -235,7 +238,12 @@
       return
     }
     if (item.type === 'PAYMENT' || data.submission_id) {
-      router.push('/payment-proof-review')
+      const roles = userRoles()
+      router.push(
+        roles.includes('Administrator') && !roles.includes('Teller')
+          ? '/notifications'
+          : '/payment-proof-review'
+      )
       return
     }
     if (

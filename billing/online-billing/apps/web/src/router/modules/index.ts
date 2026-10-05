@@ -11,9 +11,9 @@ import { systemRoutes } from './system'
 /**
  * Active domain routes for SCIPSI Online Billing, ordered by workflow.
  *
- * Role filtering removes the groups a user cannot reach, so a customer sees the
- * portal groups, a teller sees the lifecycle groups, and only an administrator
- * sees the configuration groups at the end.
+ * Role filtering removes the groups a user cannot reach. A customer sees the
+ * portal, a teller sees the billing lifecycle, a PPA user sees PPA, and an
+ * administrator sees configuration plus corrections and reports.
  */
 export const routeModules: AppRouteRecord[] = [
   dashboardRoutes,

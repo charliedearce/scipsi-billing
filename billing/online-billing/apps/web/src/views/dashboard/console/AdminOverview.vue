@@ -92,10 +92,11 @@
         </div>
         <ul class="divide-y divide-g-200">
           <li v-for="item in queueItems" :key="item.title">
-            <button
-              type="button"
+            <component
+              :is="item.to ? 'button' : 'div'"
               class="flex w-full items-center gap-3 py-3.5 text-left"
-              @click="router.push(item.to)"
+              v-bind="item.to ? { type: 'button' } : {}"
+              @click="item.to && router.push(item.to)"
             >
               <div
                 class="size-10 flex-cc shrink-0 rounded-lg"
@@ -113,8 +114,8 @@
               >
                 {{ item.count }}
               </span>
-              <ArtSvgIcon icon="ri:arrow-right-s-line" class="shrink-0 text-g-400" />
-            </button>
+              <ArtSvgIcon v-if="item.to" icon="ri:arrow-right-s-line" class="shrink-0 text-g-400" />
+            </component>
           </li>
         </ul>
       </section>
@@ -230,14 +231,14 @@
       detail: 'Waiting for a teller to claim',
       count: dashboard.value?.work_waiting.billing_requests_queued ?? 0,
       icon: 'ri:user-voice-line',
-      to: '/billing-request-queue'
+      to: undefined
     },
     {
       title: 'Payment proofs waiting',
       detail: 'Submitted or already in review',
       count: dashboard.value?.work_waiting.payment_proofs_waiting ?? 0,
       icon: 'ri:file-shield-2-line',
-      to: '/payment-proof-review'
+      to: undefined
     },
     {
       title: 'Corrections pending',

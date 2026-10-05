@@ -195,14 +195,12 @@ async function handleRouteGuard(
 
   // 6. Role-aware fallback for known claim paths (avoid bare 404 when the
   // opposite portal role opens a teller/customer claim URL).
-  const roles = Array.isArray(userStore.info?.roles)
-    ? userStore.info.roles.map(String)
-    : []
+  const roles = Array.isArray(userStore.info?.roles) ? userStore.info.roles.map(String) : []
   const isCustomer = roles.includes('Customer')
   const isClaimStaff =
     roles.includes('Teller') ||
-    roles.includes('Administrator') ||
-    (Array.isArray((userStore.info as any)?.permissions) &&
+    (!roles.includes('Administrator') &&
+      Array.isArray((userStore.info as any)?.permissions) &&
       (userStore.info as any).permissions.includes('bill_claims:review'))
 
   if (to.path === '/bill-claim-review' && isCustomer && !isClaimStaff) {
@@ -340,14 +338,12 @@ async function handleDynamicRoutes(
       closeLoading()
 
       const userStore = useUserStore()
-      const roles = Array.isArray(userStore.info?.roles)
-        ? userStore.info.roles.map(String)
-        : []
+      const roles = Array.isArray(userStore.info?.roles) ? userStore.info.roles.map(String) : []
       const isCustomer = roles.includes('Customer')
       const isClaimStaff =
         roles.includes('Teller') ||
-        roles.includes('Administrator') ||
-        (Array.isArray((userStore.info as any)?.permissions) &&
+        (!roles.includes('Administrator') &&
+          Array.isArray((userStore.info as any)?.permissions) &&
           (userStore.info as any).permissions.includes('bill_claims:review'))
 
       let fallbackPath = validatedPath

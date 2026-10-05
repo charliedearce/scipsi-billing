@@ -16,12 +16,14 @@ class Role extends Model
         'name',
         'label',
         'is_system',
+        'lock_version',
     ];
 
     protected function casts(): array
     {
         return [
             'is_system' => 'boolean',
+            'lock_version' => 'integer',
         ];
     }
 

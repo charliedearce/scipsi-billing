@@ -35,7 +35,7 @@ export const systemRoutes: AppRouteRecord = {
       meta: {
         title: 'menus.system.role',
         description:
-          'Define roles and the permissions each role grants. Permissions control which menus and actions users can reach.',
+          'Review built-in roles and manage organization permission bundles. Assign roles in User Administration.',
         icon: 'ri:user-settings-line',
         keepAlive: true,
         roles: ['Administrator']

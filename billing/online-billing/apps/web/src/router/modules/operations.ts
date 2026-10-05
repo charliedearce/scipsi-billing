@@ -1,8 +1,9 @@
 import { AppRouteRecord } from '@/types/router'
 
 /**
- * Teller and administrator workspaces, grouped along the billing lifecycle:
- * issue a bill, collect against it, correct or authorize exceptions, then report.
+ * Teller workspace, grouped along the billing lifecycle: issue a bill, collect
+ * against it, correct or authorize exceptions, then report. Corrections and
+ * reports stay available to an Administrator; the counter groups do not.
  *
  * Children keep their original absolute paths so existing deep links, worktabs
  * and dashboard shortcuts resolve unchanged.
@@ -15,7 +16,7 @@ export const operationRoutes: AppRouteRecord[] = [
     meta: {
       title: 'Billing Desk',
       icon: 'ri:briefcase-4-line',
-      roles: ['Teller', 'Administrator'],
+      roles: ['Teller'],
       absoluteChildPaths: true
     },
     children: [
@@ -29,7 +30,7 @@ export const operationRoutes: AppRouteRecord[] = [
             'Claim the oldest customer billing request, check the uploaded files, encode the bill and post it so the customer can pay. Also where tellers start a correction on an unpaid bill.',
           icon: 'ri:user-voice-line',
           keepAlive: true,
-          roles: ['Teller', 'Administrator']
+          roles: ['Teller']
         }
       },
       {
@@ -42,7 +43,7 @@ export const operationRoutes: AppRouteRecord[] = [
             'Issue a bill for a counter customer who has no portal request or uploads. The customer can later claim the bill to pay it online.',
           icon: 'ri:store-2-line',
           keepAlive: true,
-          roles: ['Teller', 'Administrator']
+          roles: ['Teller']
         }
       },
       {
@@ -55,7 +56,7 @@ export const operationRoutes: AppRouteRecord[] = [
             'Verify customer requests to link a walk-in bill to their portal account. Approving lets the customer view and pay that bill online.',
           icon: 'ri:shield-user-line',
           keepAlive: true,
-          roles: ['Teller', 'Administrator']
+          roles: ['Teller']
         }
       }
     ]
@@ -67,7 +68,7 @@ export const operationRoutes: AppRouteRecord[] = [
     meta: {
       title: 'Collections',
       icon: 'ri:wallet-3-line',
-      roles: ['Teller', 'Administrator'],
+      roles: ['Teller'],
       absoluteChildPaths: true
     },
     children: [
@@ -81,7 +82,7 @@ export const operationRoutes: AppRouteRecord[] = [
             'Claim the oldest customer payment proof, confirm the funds and reference, then approve to post the receipt (OR or acknowledgement) or reject with a reason.',
           icon: 'ri:bank-line',
           keepAlive: true,
-          roles: ['Teller', 'Administrator']
+          roles: ['Teller']
         }
       },
       {
@@ -94,7 +95,7 @@ export const operationRoutes: AppRouteRecord[] = [
             'Verify bank proofs that VIP customers submit to repay credit bills. Approving posts one collection receipt with the confirmed allocations; rejecting asks the customer to resubmit.',
           icon: 'ri:hand-coin-line',
           keepAlive: true,
-          roles: ['Teller', 'Administrator']
+          roles: ['Teller']
         }
       }
     ]
