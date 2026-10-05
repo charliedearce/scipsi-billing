@@ -86,6 +86,13 @@
             move the due date.</p
           >
         </ElFormItem>
+        <ElFormItem label="Repayment proof review target (hours)">
+          <ElInputNumber v-model="form.review_target_hours" :min="1" :max="720" />
+          <p class="w-full text-xs text-g-500 mt-1"
+            >Default is 24 hours. Missed targets flag a proof for staff review; they do not confirm
+            or reject payment, change the bill due date, or stop aging.</p
+          >
+        </ElFormItem>
         <ElFormItem label="Effective from">
           <ElDatePicker
             v-model="form.effective_from"
@@ -146,11 +153,21 @@
           }}</template>
         </ElTableColumn>
         <ElTableColumn prop="status" label="Status" width="120" />
-        <ElTableColumn label="Actions" width="180">
+        <ElTableColumn
+          label="Actions"
+          width="235"
+          class-name="mobile-table-actions"
+          label-class-name="mobile-table-actions"
+        >
           <template #default="{ row }">
-            <div v-if="row.status === 'DRAFT'" class="flex flex-wrap gap-2">
-              <ElButton type="primary" size="small" @click="publish(row)">Publish</ElButton>
-              <ElButton type="danger" size="small" plain @click="removeDraft(row)">Delete</ElButton>
+            <div class="flex flex-wrap gap-2">
+              <ElButton size="small" link @click="selectedCreditPolicy = row">View</ElButton>
+              <template v-if="row.status === 'DRAFT'">
+                <ElButton type="primary" size="small" @click="publish(row)">Publish</ElButton>
+                <ElButton type="danger" size="small" plain @click="removeDraft(row)"
+                  >Delete</ElButton
+                >
+              </template>
             </div>
           </template>
         </ElTableColumn>
@@ -260,18 +277,154 @@
           }}</template>
         </ElTableColumn>
         <ElTableColumn prop="status" label="Status" width="120" />
-        <ElTableColumn label="Actions" width="180">
+        <ElTableColumn
+          label="Actions"
+          width="235"
+          class-name="mobile-table-actions"
+          label-class-name="mobile-table-actions"
+        >
           <template #default="{ row }">
-            <div v-if="row.status === 'DRAFT'" class="flex flex-wrap gap-2">
-              <ElButton type="primary" size="small" @click="publishLate(row)">Publish</ElButton>
-              <ElButton type="danger" size="small" plain @click="removeLateDraft(row)"
-                >Delete</ElButton
-              >
+            <div class="flex flex-wrap gap-2">
+              <ElButton size="small" link @click="selectedLatePolicy = row">View</ElButton>
+              <template v-if="row.status === 'DRAFT'">
+                <ElButton type="primary" size="small" @click="publishLate(row)">Publish</ElButton>
+                <ElButton type="danger" size="small" plain @click="removeLateDraft(row)"
+                  >Delete</ElButton
+                >
+              </template>
             </div>
           </template>
         </ElTableColumn>
       </ElTable>
     </section>
+
+    <ElDrawer
+      :model-value="!!selectedCreditPolicy"
+      :title="
+        selectedCreditPolicy
+          ? `Credit policy v${selectedCreditPolicy.version_number}`
+          : 'Credit policy'
+      "
+      size="min(640px, 100%)"
+      @close="selectedCreditPolicy = null"
+    >
+      <ElDescriptions v-if="selectedCreditPolicy" :column="1" border>
+        <ElDescriptionsItem label="Status">{{ selectedCreditPolicy.status }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="Effective from">{{
+          formatDateTimeManila(selectedCreditPolicy.effective_from)
+        }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="Effective to">{{
+          selectedCreditPolicy.effective_to
+            ? formatDateTimeManila(selectedCreditPolicy.effective_to)
+            : 'Open ended'
+        }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="Currency">{{
+          selectedCreditPolicy.currency
+        }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="Default credit limit">{{
+          selectedCreditPolicy.default_credit_limit_mode === 'UNLIMITED'
+            ? 'Unlimited'
+            : money(selectedCreditPolicy.default_credit_limit_amount, selectedCreditPolicy.currency)
+        }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="Payment terms"
+          >{{ selectedCreditPolicy.payment_terms_days }} calendar days</ElDescriptionsItem
+        >
+        <ElDescriptionsItem label="Repayment proof review target"
+          >{{ selectedCreditPolicy.review_target_hours }} hours</ElDescriptionsItem
+        >
+        <ElDescriptionsItem label="Due-date basis">{{
+          selectedCreditPolicy.due_date_basis === 'INVOICE_DATE'
+            ? 'Invoice date'
+            : 'Credit-charge date'
+        }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="Overdue restriction">{{
+          selectedCreditPolicy.overdue_restriction === 'BLOCK'
+            ? 'Block new credit'
+            : selectedCreditPolicy.overdue_restriction
+        }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="Overdue grace"
+          >{{ selectedCreditPolicy.overdue_grace_days }} days</ElDescriptionsItem
+        >
+        <ElDescriptionsItem label="Account-specific overrides">{{
+          selectedCreditPolicy.allow_customer_overrides ? 'Allowed' : 'Not allowed'
+        }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="Publication reason">{{
+          selectedCreditPolicy.publication_reason || '—'
+        }}</ElDescriptionsItem>
+      </ElDescriptions>
+    </ElDrawer>
+
+    <ElDrawer
+      :model-value="!!selectedLatePolicy"
+      :title="
+        selectedLatePolicy
+          ? `Late-charge policy v${selectedLatePolicy.version_number}`
+          : 'Late-charge policy'
+      "
+      size="min(640px, 100%)"
+      @close="selectedLatePolicy = null"
+    >
+      <template v-if="selectedLatePolicy">
+        <ElDescriptions :column="1" border>
+          <ElDescriptionsItem label="Status">{{ selectedLatePolicy.status }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Effective from">{{
+            formatDateTimeManila(selectedLatePolicy.effective_from)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Effective to">{{
+            selectedLatePolicy.effective_to
+              ? formatDateTimeManila(selectedLatePolicy.effective_to)
+              : 'Open ended'
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Enabled">{{
+            selectedLatePolicy.enabled ? 'Yes' : 'No'
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Basis">{{ selectedLatePolicy.basis }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Rate or amount">{{
+            selectedLatePolicy.basis === 'PERCENTAGE'
+              ? `${selectedLatePolicy.percentage_rate}%`
+              : money(selectedLatePolicy.fixed_amount, selectedLatePolicy.currency)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Cadence">{{ selectedLatePolicy.cadence }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Grace period"
+            >{{ selectedLatePolicy.grace_days }} days</ElDescriptionsItem
+          >
+          <ElDescriptionsItem label="Minimum amount">{{
+            money(selectedLatePolicy.minimum_amount, selectedLatePolicy.currency)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Cap amount">{{
+            money(selectedLatePolicy.cap_amount, selectedLatePolicy.currency)
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Rounding">{{
+            selectedLatePolicy.rounding_mode
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Contract reference">{{
+            selectedLatePolicy.contract_reference || '—'
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Customer notice">{{
+            selectedLatePolicy.customer_notice || '—'
+          }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="Publication reason">{{
+            selectedLatePolicy.publication_reason || '—'
+          }}</ElDescriptionsItem>
+        </ElDescriptions>
+        <h3 class="mt-5 mb-2 font-semibold">Aging bands</h3>
+        <ElTable :data="selectedLatePolicy.bands || []" border>
+          <ElTableColumn prop="label" label="Band" />
+          <ElTableColumn label="Days"
+            ><template #default="{ row }"
+              >{{ row.days_from }}–{{ row.days_to ?? 'and later' }}</template
+            ></ElTableColumn
+          >
+          <ElTableColumn label="Override"
+            ><template #default="{ row }">{{
+              row.percentage_rate_override
+                ? `${row.percentage_rate_override}%`
+                : money(row.fixed_amount_override, selectedLatePolicy.currency)
+            }}</template></ElTableColumn
+          >
+        </ElTable>
+      </template>
+    </ElDrawer>
 
     <section class="art-card p-5">
       <div class="art-card-header">
@@ -283,6 +436,9 @@
             review until the fiscal gate is closed.
           </p>
         </div>
+        <ElButton @click="toggleReconciliation">
+          {{ showReconciliation ? 'Show recent' : 'Needs reconciliation' }}
+        </ElButton>
       </div>
       <ElAlert
         class="mb-4"
@@ -291,7 +447,20 @@
         show-icon
         title="Assessments remain PENDING_ACCOUNTANT_REVIEW until fiscal mapping is approved. Waive clears the assessment only."
       />
-      <ElTable :data="lateAssessments">
+      <ElAlert
+        v-if="showReconciliation"
+        class="mb-4"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="These charges were voided after a verified payment, then the receipt was reversed. Review the linked receipt and balance before deciding how to resolve them."
+      />
+      <ElTable
+        :data="lateAssessments"
+        :empty-text="
+          showReconciliation ? 'No charges need reconciliation.' : 'No recent assessments.'
+        "
+      >
         <ElTableColumn label="Customer" min-width="160">
           <template #default="{ row }">{{ row.customer?.name || '—' }}</template>
         </ElTableColumn>
@@ -303,7 +472,11 @@
         <ElTableColumn label="Amount" width="120">
           <template #default="{ row }">{{ money(row.assessed_amount) }}</template>
         </ElTableColumn>
-        <ElTableColumn prop="status" label="Status" width="120" />
+        <ElTableColumn label="Status" min-width="175">
+          <template #default="{ row }">{{
+            row.status === 'RECONCILIATION_REQUIRED' ? 'Needs reconciliation' : row.status
+          }}</template>
+        </ElTableColumn>
         <ElTableColumn label="Tax / accounting review" min-width="180">
           <template #default="{ row }">{{
             row.fiscal_mapping_status === 'PENDING_ACCOUNTANT_REVIEW'
@@ -330,6 +503,7 @@
 <script setup lang="ts">
   import { onMounted, reactive, ref } from 'vue'
   import { ElMessage, ElMessageBox } from 'element-plus'
+  import { formatDateTimeManila } from '@/utils/date/formatDateTime'
   import {
     createCreditPolicy,
     deleteCreditPolicyDraft,
@@ -356,12 +530,16 @@
   const lateRunning = ref(false)
   const policies = ref<CreditPolicyVersion[]>([])
   const latePolicies = ref<LateChargePolicyVersion[]>([])
+  const selectedCreditPolicy = ref<CreditPolicyVersion | null>(null)
+  const selectedLatePolicy = ref<LateChargePolicyVersion | null>(null)
   const lateAssessments = ref<LateChargeAssessment[]>([])
+  const showReconciliation = ref(false)
   const form = reactive({
     currency: 'PHP',
     default_credit_limit_mode: 'CAPPED' as 'CAPPED' | 'UNLIMITED',
     default_credit_limit_amount: '',
     payment_terms_days: 30,
+    review_target_hours: 24,
     due_date_basis: 'CREDIT_CHARGE_DATE' as 'INVOICE_DATE' | 'CREDIT_CHARGE_DATE',
     overdue_restriction: 'BLOCK' as 'ALLOW' | 'WARN' | 'BLOCK',
     overdue_grace_days: 0,
@@ -384,13 +562,20 @@
       ? '—'
       : new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(Number(amount))
 
+  function toggleReconciliation() {
+    showReconciliation.value = !showReconciliation.value
+    load()
+  }
+
   async function load() {
     loading.value = true
     try {
       const [credit, late, assessments] = await Promise.all([
         fetchCreditPolicies(),
         fetchLateChargePolicies(),
-        fetchLateChargeAssessments()
+        fetchLateChargeAssessments(
+          showReconciliation.value ? { status: 'RECONCILIATION_REQUIRED' } : undefined
+        )
       ])
       policies.value = Array.isArray(credit) ? credit : ((credit as any)?.data ?? [])
       latePolicies.value = Array.isArray(late) ? late : ((late as any)?.data ?? [])

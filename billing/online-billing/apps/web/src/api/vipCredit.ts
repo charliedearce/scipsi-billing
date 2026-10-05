@@ -47,6 +47,9 @@ export interface VipCreditRepayment {
   declared_reference?: string | null
   confirmed_reference?: string | null
   initial_submitted_at: string
+  review_target_hours_snapshot: number
+  review_due_at: string | null
+  review_overdue: boolean
   rejection_reason?: string | null
   resubmission_rounds?: number
   lock_version: number
@@ -79,12 +82,15 @@ export interface CreditPolicyVersion {
   default_credit_limit_mode: 'CAPPED' | 'UNLIMITED'
   default_credit_limit_amount?: string | null
   payment_terms_days: number
+  review_target_hours: number
   due_date_basis: 'INVOICE_DATE' | 'CREDIT_CHARGE_DATE'
   overdue_restriction: 'ALLOW' | 'WARN' | 'BLOCK'
   overdue_grace_days: number
   allow_customer_overrides: boolean
   status: 'DRAFT' | 'PUBLISHED'
   effective_from: string
+  effective_to?: string | null
+  publication_reason?: string | null
   lock_version: number
 }
 

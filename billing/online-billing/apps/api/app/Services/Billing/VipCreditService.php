@@ -17,7 +17,6 @@ use App\Models\ManualPaymentSubmissionProof;
 use App\Models\PrivateFile;
 use App\Models\PrivateFileVersion;
 use App\Models\Receipt;
-use App\Models\ReceiptAllocation;
 use App\Models\User;
 use App\Models\VipCreditRepaymentAllocation;
 use App\Models\VipCreditRepaymentProof;
@@ -72,14 +71,15 @@ class VipCreditService
                 'default_credit_limit_mode' => strtoupper((string) $data['default_credit_limit_mode']),
                 'default_credit_limit_amount' => $this->nullableDecimal($data['default_credit_limit_amount'] ?? null),
                 'payment_terms_days' => (int) $data['payment_terms_days'],
+                'review_target_hours' => (int) ($data['review_target_hours'] ?? 24),
                 'due_date_basis' => strtoupper((string) $data['due_date_basis']),
                 'overdue_restriction' => strtoupper((string) $data['overdue_restriction']),
                 'overdue_grace_days' => (int) ($data['overdue_grace_days'] ?? 0),
                 'overdue_amount_threshold' => $this->nullableDecimal($data['overdue_amount_threshold'] ?? null),
                 'allow_customer_overrides' => (bool) ($data['allow_customer_overrides'] ?? false),
                 'status' => CreditPolicyVersion::STATUS_DRAFT,
-                'effective_from' => Carbon::parse($data['effective_from'], 'Asia/Manila'),
-                'effective_to' => isset($data['effective_to']) ? Carbon::parse($data['effective_to'], 'Asia/Manila') : null,
+                'effective_from' => Carbon::parse($data['effective_from'], 'Asia/Manila')->utc(),
+                'effective_to' => isset($data['effective_to']) ? Carbon::parse($data['effective_to'], 'Asia/Manila')->utc() : null,
                 'created_by_user_id' => $actor->id,
                 'lock_version' => 1,
             ]);
@@ -126,7 +126,7 @@ class VipCreditService
             // is not blocked by overlap (the form has no end-date action).
             $this->preparePublishedCreditPolicyWindow($locked);
             $this->assertNoPublishedOverlap($locked);
-            $now = Carbon::now('Asia/Manila');
+            $now = Carbon::now('UTC');
             $locked->refresh();
             $locked->update([
                 'status' => CreditPolicyVersion::STATUS_PUBLISHED,
@@ -439,6 +439,7 @@ class VipCreditService
                 throw ValidationException::withMessages(['allocations' => ['A single bank-transfer repayment must use one currency.']]);
             }
             $now = Carbon::now('UTC');
+            $reviewPolicy = $this->effectivePolicy((int) $actor->organization_id, $now, true);
             $submission = VipCreditRepaymentSubmission::create([
                 'organization_id' => $actor->organization_id,
                 'customer_credit_account_id' => $account->id,
@@ -452,6 +453,7 @@ class VipCreditService
                 'declared_reference' => $data['declared_reference'] ?? null,
                 'initial_submitted_at' => $now,
                 'submitted_at' => $now,
+                'review_target_hours_snapshot' => (int) ($reviewPolicy?->review_target_hours ?? 24),
                 'lock_version' => 1,
             ]);
             foreach ($invoiceIds as $invoiceId) {
@@ -846,8 +848,7 @@ class VipCreditService
             return [];
         }
 
-        return ReceiptAllocation::whereIn('invoice_id', $invoiceIds)->whereHas('receipt', fn ($q) => $q->where('status', 'POSTED'))
-            ->select('invoice_id', DB::raw('SUM(applied_amount) as amount'))->groupBy('invoice_id')->pluck('amount', 'invoice_id')->map(fn ($amount) => (string) $amount)->all();
+        return app(InvoiceSettlementService::class)->appliedForInvoices($invoiceIds);
     }
 
     protected function invoiceOutstanding(int $invoiceId, string $total): string
@@ -988,9 +989,9 @@ class VipCreditService
 
     protected function preparePublishedCreditPolicyWindow(CreditPolicyVersion $candidate): void
     {
-        $cutover = Carbon::now('Asia/Manila');
+        $cutover = Carbon::now('UTC');
         if ($candidate->effective_from) {
-            $from = $candidate->effective_from->copy()->timezone('Asia/Manila');
+            $from = $candidate->effective_from->copy()->utc();
             if ($from->greaterThan($cutover)) {
                 $cutover = $from;
             }
@@ -1015,7 +1016,7 @@ class VipCreditService
 
             $closedAny = false;
             foreach ($openEnded as $policy) {
-                $policyStart = $policy->effective_from->copy()->timezone('Asia/Manila');
+                $policyStart = $policy->effective_from->copy()->utc();
                 if ($policyStart->lessThan($cutover)) {
                     $policy->forceFill([
                         'effective_to' => $cutover,
@@ -1031,9 +1032,9 @@ class VipCreditService
 
             // Remaining open policies start at/after cutover — advance cutover past the latest.
             $latestStart = $openEnded
-                ->map(fn (CreditPolicyVersion $policy) => $policy->effective_from->copy()->timezone('Asia/Manila')->getTimestamp())
+                ->map(fn (CreditPolicyVersion $policy) => $policy->effective_from->copy()->utc()->getTimestamp())
                 ->max();
-            $cutover = Carbon::createFromTimestamp((int) $latestStart, 'Asia/Manila')->addSecond();
+            $cutover = Carbon::createFromTimestamp((int) $latestStart, 'UTC')->addSecond();
         }
 
         $candidate->forceFill(['effective_from' => $cutover])->save();

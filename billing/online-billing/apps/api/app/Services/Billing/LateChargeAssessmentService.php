@@ -6,11 +6,13 @@ use App\Exceptions\ConcurrencyException;
 use App\Models\AuditEvent;
 use App\Models\CustomerCreditAccount;
 use App\Models\CustomerCreditAccountVersion;
+use App\Models\CustomerPaymentCreditMovement;
 use App\Models\InvoiceCreditCharge;
 use App\Models\LateChargeAssessment;
 use App\Models\LateChargeBand;
 use App\Models\LateChargeEvent;
 use App\Models\LateChargePolicyVersion;
+use App\Models\Receipt;
 use App\Models\ReceiptAllocation;
 use App\Models\User;
 use App\Models\VipCreditRepaymentSubmission;
@@ -110,6 +112,49 @@ class LateChargeAssessmentService
         return $query->paginate(min(100, max(1, (int) ($filters['per_page'] ?? 25))));
     }
 
+    public function reconcileVoidedAfterReceiptReversal(Receipt $receipt, User $actor): void
+    {
+        $invoiceIds = $receipt->allocations()->pluck('invoice_id')->unique()->all();
+        if ($invoiceIds === []) {
+            return;
+        }
+
+        $assessments = LateChargeAssessment::where('organization_id', $receipt->organization_id)
+            ->whereIn('invoice_id', $invoiceIds)
+            ->where('status', LateChargeAssessment::STATUS_VOIDED)
+            ->where('hold_reason', 'PAYMENT_EFFECTIVE_BY_ASSESSMENT_DATE')
+            ->orderBy('id')->lockForUpdate()->get();
+        foreach ($assessments as $assessment) {
+            if (bccomp($this->principalOutstanding($assessment->charge, $assessment->as_of_date), '0.00', 2) <= 0) {
+                continue;
+            }
+
+            $reason = 'Receipt reversal restored principal after this late charge was voided; staff reconciliation is required.';
+            $assessment->update([
+                'status' => LateChargeAssessment::STATUS_RECONCILIATION_REQUIRED,
+                'lock_version' => $assessment->lock_version + 1,
+            ]);
+            $this->event($assessment, $actor, 'LATE_CHARGE_RECONCILIATION_REQUIRED', $reason, [
+                'receipt_id' => $receipt->id,
+                'invoice_id' => $assessment->invoice_id,
+            ]);
+            AuditEvent::create([
+                'organization_id' => $assessment->organization_id,
+                'event_type' => 'LATE_CHARGE_RECONCILIATION_REQUIRED',
+                'aggregate_type' => 'LATE_CHARGE_ASSESSMENT',
+                'aggregate_id' => $assessment->id,
+                'aggregate_version' => $assessment->lock_version,
+                'actor_type' => 'user',
+                'actor_id' => $actor->id,
+                'permission_snapshot' => 'receipts:reverse',
+                'occurred_at' => Carbon::now(self::TIMEZONE),
+                'business_date' => $assessment->as_of_date->toDateString(),
+                'reason' => $reason,
+                'metadata' => ['receipt_id' => $receipt->id, 'invoice_id' => $assessment->invoice_id],
+            ]);
+        }
+    }
+
     public function waive(LateChargeAssessment $assessment, User $actor, int $expectedVersion, string $reason): LateChargeAssessment
     {
         if ($assessment->organization_id !== $actor->organization_id) {
@@ -191,10 +236,6 @@ class LateChargeAssessmentService
             return ['outcome' => 'SKIPPED'];
         }
 
-        $principal = $this->principalOutstanding($charge);
-        if (bccomp($principal, '0.00', 2) <= 0) {
-            return ['outcome' => 'SKIPPED'];
-        }
         if (! $charge->due_date) {
             return ['outcome' => 'SKIPPED'];
         }
@@ -213,11 +254,6 @@ class LateChargeAssessmentService
             return ['outcome' => 'SKIPPED'];
         }
 
-        $amount = $this->calculateAmount($policy, $band, $principal);
-        if (bccomp($amount, '0.00', 2) <= 0) {
-            return ['outcome' => 'SKIPPED'];
-        }
-
         $cycleKey = $this->cycleKey($policy, $charge, $asOfDate, $band);
         $existing = LateChargeAssessment::where('invoice_credit_charge_id', $charge->id)
             ->where('late_charge_policy_version_id', $policy->id)
@@ -225,7 +261,46 @@ class LateChargeAssessmentService
             ->lockForUpdate()
             ->first();
         if ($existing) {
+            if ($existing->status === LateChargeAssessment::STATUS_ON_HOLD) {
+                $principalAtAssessment = $this->principalOutstanding($charge, $existing->as_of_date);
+                $amountAtAssessment = bccomp($principalAtAssessment, '0.00', 2) > 0
+                    ? $this->calculateAmount($policy, $existing->band, $principalAtAssessment)
+                    : '0.00';
+                if (bccomp($amountAtAssessment, '0.00', 2) <= 0) {
+                    $existing->update([
+                        'status' => LateChargeAssessment::STATUS_VOIDED,
+                        'hold_reason' => 'PAYMENT_EFFECTIVE_BY_ASSESSMENT_DATE',
+                        'lock_version' => $existing->lock_version + 1,
+                    ]);
+                    $this->event($existing, $actor, 'LATE_CHARGE_VOIDED', 'Verified payment was effective by the assessment date.');
+                    $this->auditResolution($existing, $actor, 'LATE_CHARGE_VOIDED');
+                } elseif ($this->holdReason($account, $charge, $asOfDate) === null) {
+                    $existing->update([
+                        'principal_outstanding' => $principalAtAssessment,
+                        'assessed_amount' => $amountAtAssessment,
+                        'status' => LateChargeAssessment::STATUS_POSTED,
+                        'hold_reason' => null,
+                        'posted_at' => Carbon::now(self::TIMEZONE),
+                        'lock_version' => $existing->lock_version + 1,
+                    ]);
+                    $this->event($existing, $actor, 'LATE_CHARGE_POSTED', 'Payment review ended with unpaid principal.');
+                    $this->auditResolution($existing, $actor, 'LATE_CHARGE_POSTED');
+                    $this->notifyPosted($existing);
+
+                    return ['outcome' => 'CREATED', 'assessment' => $existing];
+                }
+            }
+
             return ['outcome' => 'REUSED', 'assessment' => $existing];
+        }
+
+        $principal = $this->principalOutstanding($charge, $asOfDate);
+        if (bccomp($principal, '0.00', 2) <= 0) {
+            return ['outcome' => 'SKIPPED'];
+        }
+        $amount = $this->calculateAmount($policy, $band, $principal);
+        if (bccomp($amount, '0.00', 2) <= 0) {
+            return ['outcome' => 'SKIPPED'];
         }
 
         $holdReason = $this->holdReason($account, $charge, $asOfDate);
@@ -382,14 +457,45 @@ class LateChargeAssessmentService
         return 'ONCE';
     }
 
-    protected function principalOutstanding(InvoiceCreditCharge $charge): string
+    protected function principalOutstanding(InvoiceCreditCharge $charge, Carbon $asOfDate): string
     {
         $applied = ReceiptAllocation::where('invoice_id', $charge->invoice_id)
-            ->whereHas('receipt', fn ($q) => $q->where('status', 'POSTED'))
+            ->whereHas('receipt', fn ($q) => $q->where('status', 'POSTED')->whereDate('business_date', '<=', $asOfDate->toDateString()))
             ->sum('applied_amount');
+        $credit = CustomerPaymentCreditMovement::where('type', 'APPLIED')
+            ->where('invoice_id', $charge->invoice_id)
+            ->where('created_at', '<=', $asOfDate->copy()->endOfDay()->utc())
+            ->whereHas('credit.sourceReceipt', fn ($query) => $query->where('status', 'POSTED'))
+            ->sum('amount');
+        $applied = bcadd((string) $applied, (string) $credit, 2);
         $outstanding = bcsub((string) $charge->charged_amount, (string) $applied, 2);
 
         return bccomp($outstanding, '0.00', 2) < 0 ? '0.00' : $outstanding;
+    }
+
+    protected function auditResolution(LateChargeAssessment $assessment, ?User $actor, string $eventType): void
+    {
+        AuditEvent::create([
+            'organization_id' => $assessment->organization_id,
+            'event_type' => $eventType,
+            'aggregate_type' => 'LATE_CHARGE_ASSESSMENT',
+            'aggregate_id' => $assessment->id,
+            'aggregate_version' => $assessment->lock_version,
+            'actor_type' => $actor ? 'user' : 'system',
+            'actor_id' => $actor?->id,
+            'permission_snapshot' => 'credit_late_charges:post',
+            'occurred_at' => Carbon::now(self::TIMEZONE),
+            'business_date' => $assessment->as_of_date->toDateString(),
+            'reason' => $eventType === 'LATE_CHARGE_VOIDED'
+                ? 'Verified payment was effective by the assessment date.'
+                : 'Payment review ended with unpaid principal.',
+            'metadata' => [
+                'invoice_id' => $assessment->invoice_id,
+                'cycle_key' => $assessment->cycle_key,
+                'assessed_amount' => (string) $assessment->assessed_amount,
+                'resolved_from' => LateChargeAssessment::STATUS_ON_HOLD,
+            ],
+        ]);
     }
 
     protected function truncate2(string $amount): string

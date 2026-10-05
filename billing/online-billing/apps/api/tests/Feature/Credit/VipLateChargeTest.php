@@ -8,10 +8,14 @@ use App\Models\Customer;
 use App\Models\CustomerBuyerProfile;
 use App\Models\CustomerCreditAccountVersion;
 use App\Models\CustomerUserLink;
+use App\Models\DocumentType;
 use App\Models\Invoice;
 use App\Models\InvoiceCreditCharge;
 use App\Models\LateChargeAssessment;
 use App\Models\LateChargePolicyVersion;
+use App\Models\PrivateFile;
+use App\Models\PrivateFileVersion;
+use App\Models\Receipt;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Billing\LateChargeAssessmentService;
@@ -170,6 +174,200 @@ class VipLateChargeTest extends TestCase
         $this->assertDatabaseMissing('late_charge_assessments', ['invoice_id' => $paid->id]);
     }
 
+    public function test_rejected_repayment_releases_held_charge_without_resetting_aging_or_creating_a_second_assessment(): void
+    {
+        $this->publishLateChargePolicy();
+        $invoice = $this->postedInvoice();
+        $this->actingAs($this->customerUser, 'sanctum')->postJson('/api/v1/portal/credit-charges', [
+            'customer_id' => $this->customer->id,
+            'allocations' => [[
+                'invoice_id' => $invoice->id,
+                'expected_invoice_lock_version' => $invoice->lock_version,
+                'requested_amount' => $invoice->total_charge_amount,
+            ]],
+        ])->assertCreated();
+        $dueDate = Carbon::now('Asia/Manila')->subDays(45)->toDateString();
+        InvoiceCreditCharge::where('invoice_id', $invoice->id)->update(['due_date' => $dueDate]);
+
+        $submissionId = $this->submitRepaymentProof($invoice, 'rejected-late-charge');
+
+        $asOf = Carbon::now('Asia/Manila')->toDateString();
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/late-charge-assessments/run', [
+            'as_of' => $asOf,
+        ])->assertOk()->assertJsonPath('data.held', 1);
+        $assessment = LateChargeAssessment::where('invoice_id', $invoice->id)->firstOrFail();
+        $this->assertSame(LateChargeAssessment::STATUS_ON_HOLD, $assessment->status);
+        $this->assertSame('PENDING_REPAYMENT_REVIEW', $assessment->hold_reason);
+        $this->actingAs($this->customerUser, 'sanctum')
+            ->getJson('/api/v1/portal/credit-aging?customer_id='.$this->customer->id.'&as_of='.$asOf)
+            ->assertOk()->assertJsonPath('data.currencies.0.items.0.outstanding_as_of_amount', '1064.00');
+
+        $teller = $this->userWithRole('Late Charge Teller', 'late.teller@example.test', 'Teller');
+        $claimed = $this->actingAs($teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/claim-next')->assertOk()->json('data');
+        $this->actingAs($teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/'.$submissionId.'/reject', [
+            'expected_version' => $claimed['lock_version'],
+            'reason' => 'No matching bank transaction was found.',
+        ])->assertOk()->assertJsonPath('data.status', 'REJECTED');
+
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/late-charge-assessments/run', [
+            'as_of' => $asOf,
+        ])->assertOk()->assertJsonPath('data.created', 1);
+        $assessment->refresh();
+        $this->assertSame(LateChargeAssessment::STATUS_POSTED, $assessment->status);
+        $this->assertSame('15.96', $assessment->assessed_amount);
+        $this->assertNull($assessment->hold_reason);
+        $this->assertDatabaseHas('late_charge_events', [
+            'late_charge_assessment_id' => $assessment->id,
+            'event_type' => 'LATE_CHARGE_POSTED',
+        ]);
+        $this->assertDatabaseCount('late_charge_assessments', 1);
+        $this->assertDatabaseCount('receipts', 0);
+        $this->assertSame($dueDate, InvoiceCreditCharge::where('invoice_id', $invoice->id)->firstOrFail()->due_date->toDateString());
+    }
+
+    public function test_verified_repayment_effective_by_assessment_day_voids_held_charge(): void
+    {
+        $this->publishLateChargePolicy();
+        $invoice = $this->postedInvoice();
+        $this->actingAs($this->customerUser, 'sanctum')->postJson('/api/v1/portal/credit-charges', [
+            'customer_id' => $this->customer->id,
+            'allocations' => [[
+                'invoice_id' => $invoice->id,
+                'expected_invoice_lock_version' => $invoice->lock_version,
+                'requested_amount' => $invoice->total_charge_amount,
+            ]],
+        ])->assertCreated();
+        InvoiceCreditCharge::where('invoice_id', $invoice->id)->update([
+            'due_date' => Carbon::now('Asia/Manila')->subDays(45)->toDateString(),
+        ]);
+        $submissionId = $this->submitRepaymentProof($invoice, 'verified-late-charge');
+        $asOf = Carbon::now('Asia/Manila')->toDateString();
+
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/late-charge-assessments/run', [
+            'as_of' => $asOf,
+        ])->assertOk()->assertJsonPath('data.held', 1);
+        $assessment = LateChargeAssessment::where('invoice_id', $invoice->id)->firstOrFail();
+        $teller = $this->userWithRole('Verified Charge Teller', 'verified.charge.teller@example.test', 'Teller');
+        $claimed = $this->actingAs($teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/claim-next')->assertOk()->json('data');
+        $this->actingAs($teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/'.$submissionId.'/approve', [
+            'expected_version' => $claimed['lock_version'],
+            'confirmed_reference' => 'VIP-LATE-VERIFIED-001',
+            'allocations' => [['invoice_id' => $invoice->id, 'cash_amount' => $invoice->total_charge_amount]],
+        ])->assertOk()->assertJsonPath('data.status', 'APPROVED');
+        $this->assertDatabaseHas('receipt_allocations', ['invoice_id' => $invoice->id, 'applied_amount' => '1064.00']);
+        $this->assertSame($asOf, Receipt::firstOrFail()->business_date->toDateString());
+        $this->assertSame($asOf, $assessment->fresh()->as_of_date->toDateString());
+
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/late-charge-assessments/run', [
+            'as_of' => $asOf,
+        ])->assertOk();
+        $this->assertSame(LateChargeAssessment::STATUS_VOIDED, $assessment->fresh()->status);
+        $this->assertDatabaseHas('late_charge_events', [
+            'late_charge_assessment_id' => $assessment->id,
+            'event_type' => 'LATE_CHARGE_VOIDED',
+        ]);
+        $this->assertDatabaseCount('late_charge_assessments', 1);
+    }
+
+    public function test_reversing_receipt_after_voiding_held_charge_flags_reconciliation_once(): void
+    {
+        $this->publishLateChargePolicy();
+        $invoice = $this->postedInvoice();
+        $this->actingAs($this->customerUser, 'sanctum')->postJson('/api/v1/portal/credit-charges', [
+            'customer_id' => $this->customer->id,
+            'allocations' => [[
+                'invoice_id' => $invoice->id,
+                'expected_invoice_lock_version' => $invoice->lock_version,
+                'requested_amount' => $invoice->total_charge_amount,
+            ]],
+        ])->assertCreated();
+        InvoiceCreditCharge::where('invoice_id', $invoice->id)->update([
+            'due_date' => Carbon::now('Asia/Manila')->subDays(45)->toDateString(),
+        ]);
+        $submissionId = $this->submitRepaymentProof($invoice, 'reversed-late-charge');
+        $asOf = Carbon::now('Asia/Manila')->toDateString();
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/late-charge-assessments/run', [
+            'as_of' => $asOf,
+        ])->assertOk()->assertJsonPath('data.held', 1);
+        $teller = $this->userWithRole('Reversal Charge Teller', 'reversal.charge.teller@example.test', 'Teller');
+        $claimed = $this->actingAs($teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/claim-next')->assertOk()->json('data');
+        $this->actingAs($teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/'.$submissionId.'/approve', [
+            'expected_version' => $claimed['lock_version'],
+            'confirmed_reference' => 'VIP-LATE-REVERSED-001',
+            'allocations' => [['invoice_id' => $invoice->id, 'cash_amount' => $invoice->total_charge_amount]],
+        ])->assertOk();
+        $receipt = Receipt::firstOrFail();
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/late-charge-assessments/run', [
+            'as_of' => $asOf,
+        ])->assertOk();
+        $assessment = LateChargeAssessment::where('invoice_id', $invoice->id)->firstOrFail();
+        $this->assertSame(LateChargeAssessment::STATUS_VOIDED, $assessment->status);
+
+        $requestId = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/document-correction-requests', [
+            'document_type' => 'RECEIPT',
+            'document_id' => $receipt->id,
+            'requested_action' => 'RECEIPT_REVERSAL',
+            'reason' => 'Bank confirmed the credit was returned.',
+        ])->assertCreated()->json('data.id');
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/document-correction-requests/'.$requestId.'/approve', [
+            'decision_notes' => 'Confirmed return requires settlement reversal.',
+        ])->assertOk();
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/document-correction-requests/'.$requestId.'/execute', [
+            'execution_notes' => 'Reverse returned bank credit and reconcile charge.',
+        ])->assertOk();
+
+        $this->assertSame(LateChargeAssessment::STATUS_RECONCILIATION_REQUIRED, $assessment->fresh()->status);
+        $this->actingAs($this->admin, 'sanctum')
+            ->getJson('/api/v1/admin/late-charge-assessments?status=RECONCILIATION_REQUIRED')
+            ->assertOk()->assertJsonPath('data.0.id', $assessment->id);
+        $this->actingAs($this->customerUser, 'sanctum')
+            ->getJson('/api/v1/portal/credit-aging?customer_id='.$this->customer->id.'&as_of='.$asOf)
+            ->assertOk()->assertJsonPath('data.currencies.0.items.0.outstanding_as_of_amount', '1064.00');
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/document-correction-requests/'.$requestId.'/execute', [
+            'execution_notes' => 'Retry settlement reversal.',
+        ])->assertOk();
+        $this->assertSame(1, $assessment->events()->where('event_type', 'LATE_CHARGE_RECONCILIATION_REQUIRED')->count());
+        $this->assertDatabaseCount('late_charge_assessments', 1);
+    }
+
+    public function test_repayment_effective_after_assessment_day_does_not_erase_held_late_charge(): void
+    {
+        $this->publishLateChargePolicy();
+        $invoice = $this->postedInvoice();
+        $this->actingAs($this->customerUser, 'sanctum')->postJson('/api/v1/portal/credit-charges', [
+            'customer_id' => $this->customer->id,
+            'allocations' => [[
+                'invoice_id' => $invoice->id,
+                'expected_invoice_lock_version' => $invoice->lock_version,
+                'requested_amount' => $invoice->total_charge_amount,
+            ]],
+        ])->assertCreated();
+        InvoiceCreditCharge::where('invoice_id', $invoice->id)->update([
+            'due_date' => Carbon::now('Asia/Manila')->subDays(45)->toDateString(),
+        ]);
+        $submissionId = $this->submitRepaymentProof($invoice, 'late-effective-payment');
+        $asOf = Carbon::now('Asia/Manila')->toDateString();
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/late-charge-assessments/run', [
+            'as_of' => $asOf,
+        ])->assertOk()->assertJsonPath('data.held', 1);
+        $assessment = LateChargeAssessment::where('invoice_id', $invoice->id)->firstOrFail();
+        $teller = $this->userWithRole('Late Effective Teller', 'late.effective.teller@example.test', 'Teller');
+        $claimed = $this->actingAs($teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/claim-next')->assertOk()->json('data');
+        $this->actingAs($teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/'.$submissionId.'/approve', [
+            'expected_version' => $claimed['lock_version'],
+            'confirmed_reference' => 'VIP-LATE-EFFECTIVE-001',
+            'allocations' => [['invoice_id' => $invoice->id, 'cash_amount' => $invoice->total_charge_amount]],
+        ])->assertOk()->assertJsonPath('data.status', 'APPROVED');
+        Receipt::firstOrFail()->update(['business_date' => Carbon::parse($asOf, 'Asia/Manila')->addDay()->toDateString()]);
+
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/late-charge-assessments/run', [
+            'as_of' => Carbon::parse($asOf, 'Asia/Manila')->addDay()->toDateString(),
+        ])->assertOk()->assertJsonPath('data.created', 1);
+        $this->assertSame(LateChargeAssessment::STATUS_POSTED, $assessment->fresh()->status);
+        $this->assertSame('15.96', $assessment->fresh()->assessed_amount);
+        $this->assertDatabaseCount('late_charge_assessments', 1);
+    }
+
     public function test_administrator_can_waive_posted_late_charge_without_rewriting_invoice(): void
     {
         $this->publishLateChargePolicy();
@@ -265,6 +463,45 @@ class VipLateChargeTest extends TestCase
         InvoiceCreditCharge::where('invoice_id', $invoice->id)->update([
             'charged_amount' => '0.00',
         ]);
+    }
+
+    protected function submitRepaymentProof(Invoice $invoice, string $suffix): int
+    {
+        $type = DocumentType::where('code', 'BANK_DEPOSIT_SLIP')->firstOrFail();
+        $file = PrivateFile::create([
+            'organization_id' => $this->admin->organization_id,
+            'document_type_id' => $type->id,
+            'purpose' => 'PAYMENT_PROOF',
+            'uploaded_by' => $this->customerUser->id,
+            'owner_id' => $this->customerUser->id,
+            'current_version' => 1,
+            'status' => 'CLEAN',
+        ]);
+        PrivateFileVersion::create([
+            'private_file_id' => $file->id,
+            'version_number' => 1,
+            'disk' => 'private',
+            'file_path' => 'tests/vip-credit/'.$suffix.'.pdf',
+            'original_name' => $suffix.'.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 128,
+            'sha256_checksum' => hash('sha256', $suffix),
+            'scan_status' => 'CLEAN',
+            'scan_details' => ['scanner' => 'test'],
+            'uploaded_by' => $this->customerUser->id,
+            'created_at' => now(),
+        ]);
+
+        return $this->actingAs($this->customerUser, 'sanctum')->postJson('/api/v1/portal/credit-repayments', [
+            'customer_id' => $this->customer->id,
+            'proof_file_id' => $file->id,
+            'declared_reference' => 'DECL-'.$suffix,
+            'allocations' => [[
+                'invoice_id' => $invoice->id,
+                'expected_invoice_lock_version' => $invoice->lock_version,
+                'requested_amount' => $invoice->total_charge_amount,
+            ]],
+        ])->assertCreated()->json('data.id');
     }
 
     protected function vipCustomer(): Customer

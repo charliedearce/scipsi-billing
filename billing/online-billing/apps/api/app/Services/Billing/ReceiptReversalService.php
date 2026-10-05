@@ -105,6 +105,8 @@ class ReceiptReversalService
                 );
             }
 
+            app(CustomerPaymentCreditService::class)->reverseUnusedForReceipt($receipt, $actor);
+
             $invoiceIds = ReceiptAllocation::where('receipt_id', $receipt->id)
                 ->orderBy('invoice_id')
                 ->pluck('invoice_id')
@@ -158,6 +160,7 @@ class ReceiptReversalService
                 'status' => 'REVERSED',
                 'lock_version' => $receipt->lock_version + 1,
             ]);
+            app(LateChargeAssessmentService::class)->reconcileVoidedAfterReceiptReversal($receipt, $actor);
 
             $existingLink = DocumentCorrectionLink::where('organization_id', $receipt->organization_id)
                 ->where('original_document_type', 'RECEIPT')

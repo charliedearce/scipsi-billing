@@ -27,6 +27,7 @@ export interface LateChargePolicyVersion {
   status: 'DRAFT' | 'PUBLISHED'
   effective_from: string
   effective_to?: string | null
+  publication_reason?: string | null
   lock_version: number
   bands?: LateChargeBand[]
 }

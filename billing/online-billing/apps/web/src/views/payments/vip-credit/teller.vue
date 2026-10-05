@@ -28,6 +28,21 @@
           <p>A proof is not a receipt until the confirmed allocations are posted</p>
         </div>
       </div>
+      <ElAlert
+        class="mb-4"
+        type="info"
+        :closable="false"
+        show-icon
+        title="Pending proof does not change the bill due date or principal aging. Review the oldest submissions promptly; approve only confirmed funds or reject with a reason."
+      />
+      <ElAlert
+        v-if="overdueCount > 0"
+        class="mb-4"
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="`${overdueCount} VIP repayment proof${overdueCount === 1 ? '' : 's'} past the review target. Verify the bank record and decide each proof.`"
+      />
       <ElEmpty
         v-if="!loading && submissions.length === 0"
         description="No VIP repayment proof is waiting for review."
@@ -35,6 +50,17 @@
       <ElTable v-else v-loading="loading" :data="submissions"
         ><ElTableColumn prop="id" label="Submission" width="110"
           ><template #default="{ row }">#{{ row.id }}</template></ElTableColumn
+        ><ElTableColumn label="First submitted" min-width="170"
+          ><template #default="{ row }">{{
+            formatDateTimeManila(row.initial_submitted_at)
+          }}</template></ElTableColumn
+        ><ElTableColumn label="Review by" min-width="190"
+          ><template #default="{ row }">
+            <span>{{ formatDateTimeManila(row.review_due_at) }}</span>
+            <ElTag v-if="row.review_overdue" class="ml-2" type="warning" size="small"
+              >Overdue</ElTag
+            >
+          </template></ElTableColumn
         ><ElTableColumn label="Customer" min-width="180"
           ><template #default="{ row }">{{
             row.customer?.name || `Customer #${row.customer_id}`
@@ -76,8 +102,9 @@
   </div>
 </template>
 <script setup lang="ts">
-  import { onMounted, ref } from 'vue'
+  import { computed, onMounted, ref } from 'vue'
   import { ElMessage, ElMessageBox } from 'element-plus'
+  import { formatDateTimeManila } from '@/utils/date/formatDateTime'
   import { fetchGetUserInfo } from '@/api/auth'
   import { useAuthoritativeRealtimeRefresh } from '@/composables/useAuthoritativeRealtimeRefresh'
   import {
@@ -91,6 +118,7 @@
   const loading = ref(false)
   const claiming = ref(false)
   const submissions = ref<VipCreditRepayment[]>([])
+  const overdueCount = computed(() => submissions.value.filter((row) => row.review_overdue).length)
   const realtime = useAuthoritativeRealtimeRefresh({
     scope: 'vip_credit',
     refresh: () => load(),

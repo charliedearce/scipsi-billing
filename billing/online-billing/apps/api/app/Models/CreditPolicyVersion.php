@@ -14,7 +14,7 @@ class CreditPolicyVersion extends Model
 
     protected $fillable = [
         'organization_id', 'version_number', 'currency', 'default_credit_limit_mode',
-        'default_credit_limit_amount', 'payment_terms_days', 'due_date_basis', 'overdue_restriction',
+        'default_credit_limit_amount', 'payment_terms_days', 'review_target_hours', 'due_date_basis', 'overdue_restriction',
         'overdue_grace_days', 'overdue_amount_threshold', 'allow_customer_overrides', 'status',
         'effective_from', 'effective_to', 'created_by_user_id', 'published_by_user_id', 'published_at',
         'publication_reason', 'lock_version',
@@ -23,7 +23,7 @@ class CreditPolicyVersion extends Model
     protected function casts(): array
     {
         return [
-            'default_credit_limit_amount' => 'string', 'payment_terms_days' => 'integer',
+            'default_credit_limit_amount' => 'string', 'payment_terms_days' => 'integer', 'review_target_hours' => 'integer',
             'overdue_grace_days' => 'integer', 'overdue_amount_threshold' => 'string',
             'allow_customer_overrides' => 'boolean', 'effective_from' => 'datetime', 'effective_to' => 'datetime',
             'published_at' => 'datetime', 'lock_version' => 'integer',

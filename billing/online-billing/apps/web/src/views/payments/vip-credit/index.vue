@@ -21,7 +21,7 @@
           </p>
         </div>
       </div>
-      <ElButton :loading="loading" @click="loadWorkspace">
+      <ElButton :loading="loading" @click="loadWorkspace()">
         <ArtSvgIcon icon="ri:refresh-line" class="mr-1" />
         Refresh
       </ElButton>
@@ -587,10 +587,21 @@
   const viewingRepayment = ref<VipCreditRepayment | null>(null)
   const receiptViewerVisible = ref(false)
   const viewingReceipt = ref<NonNullable<VipCreditRepayment['receipt']> | null>(null)
+  function isEditingCredit() {
+    return (
+      loading.value ||
+      charging.value ||
+      submitting.value ||
+      repaymentDialog.value ||
+      resubmitDialog.value ||
+      selectedBills.value.length > 0 ||
+      selectedCharges.value.length > 0
+    )
+  }
   const realtime = useAuthoritativeRealtimeRefresh({
     scope: 'vip_credit',
-    refresh: () => loadWorkspace(),
-    isBusy: () => charging.value || submitting.value
+    refresh: () => loadWorkspace(false),
+    isBusy: isEditingCredit
   })
   const agingBuckets = [
     { key: 'CURRENT', label: 'Current' },
@@ -790,8 +801,8 @@
     repaymentPerPage.value = page.per_page || 20
     repaymentTotal.value = page.total ?? repayments.value.length
   }
-  async function loadWorkspace() {
-    loading.value = true
+  async function loadWorkspace(showLoading = true) {
+    if (showLoading) loading.value = true
     try {
       const [profile, me] = await Promise.all([fetchPortalProfile(), fetchGetUserInfo()])
       realtime.startForUser(Number((me as any).id || (me as any).userId))
@@ -805,6 +816,7 @@
         fetchDocumentTypes({ purpose: 'PAYMENT_PROOF', is_active: true }),
         fetchPortalCreditAging(activeCustomerId.value, agingAsOf.value)
       ])
+      if (!showLoading && isEditingCredit()) return
       summary.value = nextSummary
       bills.value = nextBills
       applyRepaymentPage(nextRepayments)
@@ -812,9 +824,9 @@
       aging.value = nextAging
       seedRepaymentAmounts()
     } catch (error: any) {
-      ElMessage.error(error?.message || 'Unable to load VIP credit information.')
+      if (showLoading) ElMessage.error(error?.message || 'Unable to load VIP credit information.')
     } finally {
-      loading.value = false
+      if (showLoading) loading.value = false
     }
   }
   async function loadRepayments(page = repaymentPage.value) {
@@ -914,7 +926,7 @@
       submitting.value = false
     }
   }
-  onMounted(loadWorkspace)
+  onMounted(() => loadWorkspace())
 </script>
 
 <style scoped lang="scss">

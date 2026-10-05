@@ -188,6 +188,7 @@ class VipCreditController extends Controller
             'default_credit_limit_mode' => ['required', 'in:CAPPED,UNLIMITED'],
             'default_credit_limit_amount' => ['nullable', 'regex:/^\d+(\.\d{1,2})?$/', 'min:0'],
             'payment_terms_days' => ['required', 'integer', 'min:1', 'max:3650'],
+            'review_target_hours' => ['nullable', 'integer', 'min:1', 'max:720'],
             'due_date_basis' => ['required', 'in:INVOICE_DATE,CREDIT_CHARGE_DATE'],
             'overdue_restriction' => ['required', 'in:ALLOW,WARN,BLOCK'],
             'overdue_grace_days' => ['nullable', 'integer', 'min:0', 'max:365'],

@@ -244,6 +244,7 @@ class VipCreditAgingService
             'currency' => $invoice->currency,
             'invoice_total_amount' => (string) $invoice->total_charge_amount,
             'applied_amount' => $applied,
+            'customer_payment_credit_applied_amount' => app(CustomerPaymentCreditService::class)->applicationsForInvoices([$invoice->id])[$invoice->id] ?? '0.00',
             'outstanding_amount' => $outstanding,
             'confirmed_receipt_count' => $receiptSummaries['count'],
             'receipt_history_truncated' => $receiptSummaries['truncated'],
@@ -289,8 +290,11 @@ class VipCreditAgingService
             $items = $currencyCharges->map(function (InvoiceCreditCharge $charge) use ($applied, $asOf, &$buckets): array {
                 $outstanding = $this->positiveDifference((string) $charge->charged_amount, $applied[$charge->invoice_id] ?? '0.00');
                 $classification = $charge->due_date ? 'CLASSIFIED' : 'UNCLASSIFIED_NEEDS_TERMS_REVIEW';
-                $daysPastDue = $charge->due_date && $charge->due_date->lt($asOf) ? $charge->due_date->diffInDays($asOf) : 0;
-                $bucket = $classification === 'CLASSIFIED' ? $this->bucketFor((int) $daysPastDue) : 'UNCLASSIFIED';
+                $dueDate = $charge->due_date
+                    ? Carbon::createFromFormat('Y-m-d', $charge->due_date->toDateString(), self::TIMEZONE)->startOfDay()
+                    : null;
+                $daysPastDue = $dueDate && $dueDate->lt($asOf) ? (int) $dueDate->diffInDays($asOf) : 0;
+                $bucket = $classification === 'CLASSIFIED' ? $this->bucketFor($daysPastDue) : 'UNCLASSIFIED';
                 $buckets[$bucket] = bcadd($buckets[$bucket], $outstanding, 2);
 
                 return [
@@ -341,11 +345,21 @@ class VipCreditAgingService
             return [];
         }
 
-        return ReceiptAllocation::whereIn('invoice_id', $invoiceIds)
+        $totals = ReceiptAllocation::whereIn('invoice_id', $invoiceIds)
             ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED')->whereDate('business_date', '<=', $asOf->toDateString()))
             ->select('invoice_id', DB::raw('SUM(applied_amount) as amount'))
             ->groupBy('invoice_id')->pluck('amount', 'invoice_id')
             ->map(fn ($amount) => (string) $amount)->all();
+        $creditRows = \App\Models\CustomerPaymentCreditMovement::where('type', 'APPLIED')
+            ->whereIn('invoice_id', $invoiceIds)
+            ->where('created_at', '<=', $asOf->copy()->endOfDay()->utc())
+            ->whereHas('credit.sourceReceipt', fn ($query) => $query->where('status', 'POSTED'))
+            ->get();
+        foreach ($creditRows as $row) {
+            $totals[$row->invoice_id] = bcadd($totals[$row->invoice_id] ?? '0.00', (string) $row->amount, 2);
+        }
+
+        return $totals;
     }
 
     /** @return array<int,string> */
@@ -355,11 +369,7 @@ class VipCreditAgingService
             return [];
         }
 
-        return ReceiptAllocation::whereIn('invoice_id', $invoiceIds)
-            ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))
-            ->select('invoice_id', DB::raw('SUM(applied_amount) as amount'))
-            ->groupBy('invoice_id')->pluck('amount', 'invoice_id')
-            ->map(fn ($amount) => (string) $amount)->all();
+        return app(InvoiceSettlementService::class)->appliedForInvoices($invoiceIds);
     }
 
     /**

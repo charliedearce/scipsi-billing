@@ -235,6 +235,64 @@ class VipCreditWorkflowTest extends TestCase
         $this->assertDatabaseCount('receipts', 1);
     }
 
+    public function test_vip_review_target_defaults_to_24_hours_and_custom_setting_is_snapshotted(): void
+    {
+        $start = Carbon::now('UTC')->addMinutes(5)->startOfMinute();
+        $this->travelTo($start);
+        try {
+            $first = $this->postedInvoice();
+            $this->charge($first);
+            $firstSubmission = $this->submitRepayment($first, $this->paymentProof('review-default'), '100.00');
+            $this->assertSame(24, $firstSubmission->review_target_hours_snapshot);
+            $this->actingAs($this->teller, 'sanctum')->getJson('/api/v1/teller/credit-repayments')
+                ->assertOk()->assertJsonPath('data.0.review_overdue', false);
+
+            $policyData = [
+                'currency' => 'PHP', 'default_credit_limit_mode' => 'CAPPED',
+                'default_credit_limit_amount' => '50000.00', 'payment_terms_days' => 30,
+                'due_date_basis' => 'CREDIT_CHARGE_DATE', 'overdue_restriction' => 'WARN',
+                'review_target_hours' => 48, 'effective_from' => now('Asia/Manila')->toIso8601String(),
+            ];
+            $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/credit-policies', [
+                ...$policyData, 'review_target_hours' => 0,
+            ])->assertStatus(422)->assertJsonValidationErrors('review_target_hours');
+            $draft = $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/credit-policies', $policyData)
+                ->assertCreated()->assertJsonPath('data.review_target_hours', 48)->json('data');
+            $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/admin/credit-policies/'.$draft['id'].'/publish', [
+                'expected_lock_version' => $draft['lock_version'], 'reason' => 'Allow two days for VIP bank matching.',
+            ])->assertOk();
+
+            $this->travelTo($start->copy()->addMinute());
+            $published = CreditPolicyVersion::findOrFail($draft['id']);
+            $this->assertTrue($published->effective_from->lessThanOrEqualTo(Carbon::now('UTC')), $published->effective_from->toIso8601String().' > '.Carbon::now('UTC')->toIso8601String());
+            $second = $this->postedInvoice();
+            $this->charge($second);
+            $secondSubmission = $this->submitRepayment($second, $this->paymentProof('review-custom'), '100.00');
+            $this->assertSame(48, $secondSubmission->review_target_hours_snapshot);
+
+            $this->travelTo($start->copy()->addHours(25));
+            $queue = $this->actingAs($this->teller, 'sanctum')->getJson('/api/v1/teller/credit-repayments')->assertOk();
+            $queue->assertJsonPath('data.0.review_overdue', true)
+                ->assertJsonPath('data.1.review_overdue', false);
+            $this->assertTrue(Carbon::parse($queue->json('data.0.review_due_at'))->equalTo($start->copy()->addHours(24)));
+            $this->assertTrue(Carbon::parse($queue->json('data.1.review_due_at'))->equalTo($start->copy()->addHours(48)->addMinute()));
+            $this->assertDatabaseCount('receipts', 0);
+
+            $claimed = $this->actingAs($this->teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/claim-next')->assertOk()->json('data');
+            $this->actingAs($this->teller, 'sanctum')->postJson('/api/v1/teller/credit-repayments/'.$firstSubmission->id.'/reject', [
+                'expected_version' => $claimed['lock_version'], 'reason' => 'No matching bank transfer was found.',
+            ])->assertOk()->assertJsonPath('data.review_overdue', false);
+            $resubmitted = $this->actingAs($this->customerUser, 'sanctum')->postJson('/api/v1/portal/credit-repayments/'.$firstSubmission->id.'/resubmit', [
+                'proof_file_id' => $this->paymentProof('review-resubmission')->id,
+            ])->assertOk()->assertJsonPath('data.review_target_hours_snapshot', 24)
+                ->assertJsonPath('data.review_overdue', false);
+            $this->assertTrue(Carbon::parse($resubmitted->json('data.review_due_at'))->equalTo($start->copy()->addHours(49)));
+            $this->assertDatabaseCount('receipts', 0);
+        } finally {
+            $this->travelBack();
+        }
+    }
+
     public function test_vip_repayment_submission_times_keep_the_actual_utc_instant(): void
     {
         $invoice = $this->postedInvoice();
@@ -322,6 +380,33 @@ class VipCreditWorkflowTest extends TestCase
             ->getJson('/api/v1/portal/credit-aging?customer_id='.$this->customer->id.'&as_of='.$today->copy()->addDay()->toDateString())
             ->assertOk()->assertJsonPath('data.currencies.0.buckets.91_PLUS', '564.00')
             ->assertJsonPath('data.currencies.0.items.0.applied_as_of_amount', '500.00');
+    }
+
+    public function test_vip_aging_counts_whole_manila_calendar_days_at_bucket_boundaries(): void
+    {
+        $invoice = $this->postedInvoice();
+        $this->charge($invoice);
+        $today = now('Asia/Manila')->startOfDay();
+        $charge = InvoiceCreditCharge::where('invoice_id', $invoice->id)->firstOrFail();
+        $charge->update(['charged_business_date' => $today->copy()->subDays(120)->toDateString()]);
+
+        foreach ([
+            [0, 0, 'CURRENT'],
+            [1, 1, '1_30'],
+            [30, 30, '1_30'],
+            [31, 31, '31_60'],
+            [60, 60, '31_60'],
+            [61, 61, '61_90'],
+            [90, 90, '61_90'],
+            [91, 91, '91_PLUS'],
+        ] as [$daysBefore, $expectedDays, $expectedBucket]) {
+            $charge->update(['due_date' => $today->copy()->subDays($daysBefore)->toDateString()]);
+            $this->actingAs($this->customerUser, 'sanctum')
+                ->getJson('/api/v1/portal/credit-aging?customer_id='.$this->customer->id.'&as_of='.$today->toDateString())
+                ->assertOk()
+                ->assertJsonPath('data.currencies.0.items.0.days_past_due', $expectedDays)
+                ->assertJsonPath('data.currencies.0.items.0.bucket', $expectedBucket);
+        }
     }
 
     public function test_missing_due_date_is_reconciled_as_unclassified_and_ppa_keeps_on_credit_separate_from_paid(): void

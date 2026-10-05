@@ -27,7 +27,7 @@
         </ElButton>
         <ElButton v-if="canExport" type="primary" :loading="exporting" @click="exportCsv">
           <ArtSvgIcon icon="ri:download-2-line" class="mr-1" />
-          Export CSV
+          Export full CSV
         </ElButton>
       </div>
     </header>
@@ -41,30 +41,109 @@
       <div class="art-card-header">
         <div class="title">
           <h4>Scoped credit accounts</h4>
-          <p>Select an account to open its aging detail</p>
+          <p>Balances at the selected date. Select an account to see its aging detail.</p>
         </div>
       </div>
+      <ElRadioGroup v-model="view" class="mb-4" @change="syncSelection">
+        <ElRadioButton value="balance">With balance ({{ balanceAccounts.length }})</ElRadioButton>
+        <ElRadioButton value="overdue">Overdue ({{ overdueAccounts.length }})</ElRadioButton>
+        <ElRadioButton value="all">All accounts ({{ accounts.length }})</ElRadioButton>
+      </ElRadioGroup>
       <ElEmpty
         v-if="accounts.length === 0"
         description="No VIP credit accounts are available in your scope."
       />
-      <ElTable v-else :data="accounts" highlight-current-row @current-change="selectAccount">
-        <ElTableColumn label="Customer" min-width="210"
-          ><template #default="{ row }"
-            >{{ row.account.customer_name
-            }}<span class="block text-xs text-g-500">{{
-              row.account.account_number
-            }}</span></template
-          ></ElTableColumn
+      <ElEmpty
+        v-else-if="visibleAccounts.length === 0"
+        :description="
+          view === 'overdue'
+            ? 'No overdue balances at this date.'
+            : 'No outstanding balances at this date.'
+        "
+      />
+      <template v-else>
+        <div class="space-y-3 sm:hidden">
+          <button
+            v-for="row in visibleAccounts"
+            :key="row.account?.id"
+            type="button"
+            class="art-card-xs w-full p-3 text-left"
+            :class="selectedAccountId === row.account?.id ? 'ring-1 ring-theme' : ''"
+            @click="selectAccount(row)"
+          >
+            <span class="block font-medium text-g-900">{{
+              row.account?.customer_name || 'Credit account'
+            }}</span>
+            <span class="block text-xs text-g-500"
+              >{{ row.account?.account_number }} · As of {{ row.as_of_date }}</span
+            >
+            <span class="mt-3 grid grid-cols-2 gap-3 text-sm">
+              <span>
+                <span class="block text-xs text-g-500">Outstanding</span>
+                <span
+                  v-for="group in balanceGroups(row)"
+                  :key="group.currency"
+                  class="block font-medium"
+                >
+                  {{ money(group.outstanding_amount, group.currency) }}
+                </span>
+                <span v-if="balanceGroups(row).length === 0" class="text-g-500">No balance</span>
+              </span>
+              <span>
+                <span class="block text-xs text-g-500">Overdue</span>
+                <span
+                  v-for="group in overdueGroups(row)"
+                  :key="group.currency"
+                  class="block font-medium"
+                >
+                  {{ money(overdueAmount(group), group.currency) }}
+                </span>
+                <span v-if="overdueGroups(row).length === 0" class="text-g-500"
+                  >No overdue balance</span
+                >
+              </span>
+            </span>
+          </button>
+        </div>
+        <ElTable
+          :data="visibleAccounts"
+          class="hidden sm:block"
+          highlight-current-row
+          @current-change="selectAccount"
         >
-        <ElTableColumn prop="as_of_date" label="As of" width="130" />
-        <ElTableColumn label="Outstanding" align="right" min-width="150"
-          ><template #default="{ row }">{{ total(row) }}</template></ElTableColumn
-        >
-        <ElTableColumn label="Overdue" align="right" min-width="150"
-          ><template #default="{ row }">{{ overdue(row) }}</template></ElTableColumn
-        >
-      </ElTable>
+          <ElTableColumn label="Customer" min-width="210"
+            ><template #default="{ row }"
+              >{{ row.account.customer_name
+              }}<span class="block text-xs text-g-500">{{
+                row.account.account_number
+              }}</span></template
+            ></ElTableColumn
+          >
+          <ElTableColumn prop="as_of_date" label="As of" width="130" />
+          <ElTableColumn label="Outstanding" align="right" min-width="150"
+            ><template #default="{ row }"
+              ><div v-for="group in balanceGroups(row)" :key="group.currency">
+                {{ money(group.outstanding_amount, group.currency) }}
+              </div>
+              <span v-if="balanceGroups(row).length === 0" class="text-g-500">No balance</span>
+            </template></ElTableColumn
+          >
+          <ElTableColumn label="Overdue" align="right" min-width="150"
+            ><template #default="{ row }"
+              ><div v-for="group in overdueGroups(row)" :key="group.currency">
+                {{ money(overdueAmount(group), group.currency) }}
+              </div>
+              <span v-if="overdueGroups(row).length === 0" class="text-g-500"
+                >No overdue balance</span
+              >
+            </template></ElTableColumn
+          >
+        </ElTable>
+      </template>
+      <p v-if="canExport" class="mt-3 text-xs text-g-500">
+        The full CSV includes all accounts and invoice history at this date, regardless of this
+        view.
+      </p>
     </section>
     <section v-if="selected" class="art-card p-5">
       <div class="art-card-header">
@@ -132,6 +211,7 @@
   }
   const asOf = ref(manilaToday())
   const accounts = ref<VipCreditAging[]>([])
+  const view = ref<'balance' | 'overdue' | 'all'>('balance')
   const selectedAccountId = ref<number | null>(null)
   const userStore = useUserStore()
   // The server also requires Administrator authority because credit accounts are
@@ -145,40 +225,48 @@
     { key: '91_PLUS', label: '91+' },
     { key: 'UNCLASSIFIED', label: 'Needs terms review' }
   ]
+  type CurrencyAging = VipCreditAging['currencies'][number]
+  const balanceGroups = (aging: VipCreditAging) =>
+    aging.currencies.filter((group) => Number(group.outstanding_amount) > 0)
+  const overdueAmount = (group: CurrencyAging) =>
+    ['1_30', '31_60', '61_90', '91_PLUS'].reduce(
+      (sum, bucket) => sum + Number(group.buckets[bucket as AgingBucket]),
+      0
+    )
+  const overdueGroups = (aging: VipCreditAging) =>
+    aging.currencies.filter((group) => overdueAmount(group) > 0)
+  const balanceAccounts = computed(() =>
+    accounts.value.filter((aging) => balanceGroups(aging).length)
+  )
+  const overdueAccounts = computed(() =>
+    accounts.value.filter((aging) => overdueGroups(aging).length)
+  )
+  const visibleAccounts = computed(() =>
+    view.value === 'balance'
+      ? balanceAccounts.value
+      : view.value === 'overdue'
+        ? overdueAccounts.value
+        : accounts.value
+  )
   const selected = computed(
     () =>
-      accounts.value.find((item) => item.account?.id === selectedAccountId.value) ||
-      accounts.value[0]
+      visibleAccounts.value.find((item) => item.account?.id === selectedAccountId.value) ||
+      visibleAccounts.value[0]
   )
-  const money = (amount: string, currency = 'PHP') =>
+  const money = (amount: string | number, currency = 'PHP') =>
     new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(Number(amount))
-  const total = (aging: VipCreditAging) =>
-    money(
-      aging.currencies.reduce((sum, group) => sum + Number(group.outstanding_amount), 0).toFixed(2)
-    )
-  const overdue = (aging: VipCreditAging) =>
-    money(
-      aging.currencies
-        .reduce(
-          (sum, group) =>
-            sum +
-            Number(group.buckets['1_30']) +
-            Number(group.buckets['31_60']) +
-            Number(group.buckets['61_90']) +
-            Number(group.buckets['91_PLUS']),
-          0
-        )
-        .toFixed(2)
-    )
   function selectAccount(row?: VipCreditAging) {
-    selectedAccountId.value = row?.account?.id || null
+    if (row?.account?.id) selectedAccountId.value = row.account.id
+  }
+  function syncSelection() {
+    if (!visibleAccounts.value.some((item) => item.account?.id === selectedAccountId.value))
+      selectedAccountId.value = visibleAccounts.value[0]?.account?.id || null
   }
   async function load() {
     loading.value = true
     try {
       accounts.value = await fetchStaffCreditAgingIndex(asOf.value)
-      if (!accounts.value.some((item) => item.account?.id === selectedAccountId.value))
-        selectAccount(accounts.value[0])
+      syncSelection()
     } catch (error: any) {
       ElMessage.error(error?.message || 'Unable to load VIP credit aging.')
     } finally {
