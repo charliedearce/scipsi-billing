@@ -141,6 +141,7 @@ class DocumentCorrectionRequestService
                 throw ValidationException::withMessages(['document' => ['Only a posted invoice can enter the issued-unpaid correction workflow.']]);
             }
             $hasSettlement = ReceiptAllocation::where('invoice_id', $target->id)->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))->exists();
+            $hasSettlement = $hasSettlement || (app(CustomerPaymentCreditService::class)->applicationsForInvoices([$target->id])[$target->id] ?? '0.00') !== '0.00';
             if ($hasSettlement) {
                 throw ValidationException::withMessages(['document' => ['An invoice with posted settlement cannot be corrected through the issued-unpaid workflow.']]);
             }

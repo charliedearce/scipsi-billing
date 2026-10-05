@@ -344,6 +344,7 @@ class InvoiceCorrectionExecutionService
         $hasSettlement = ReceiptAllocation::where('invoice_id', $invoice->id)
             ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))
             ->exists();
+        $hasSettlement = $hasSettlement || (app(CustomerPaymentCreditService::class)->applicationsForInvoices([$invoice->id])[$invoice->id] ?? '0.00') !== '0.00';
         if ($hasSettlement) {
             throw ValidationException::withMessages([
                 'document' => ['An invoice with posted settlement cannot execute the unpaid linked-correction path.'],
