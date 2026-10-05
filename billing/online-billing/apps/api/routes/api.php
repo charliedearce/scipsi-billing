@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\V1\ContactVerificationController;
 use App\Http\Controllers\Api\V1\ConversationController;
 use App\Http\Controllers\Api\V1\CustomerAccountAdminController;
 use App\Http\Controllers\Api\V1\CustomerBillingRequestController;
+use App\Http\Controllers\Api\V1\CustomerPaymentCreditController;
 use App\Http\Controllers\Api\V1\CustomerProfileController;
 use App\Http\Controllers\Api\V1\CustomerRegistrationController;
 use App\Http\Controllers\Api\V1\CustomerTaxEvidenceController;
@@ -108,6 +109,9 @@ Route::prefix('v1')->group(function (): void {
         // Roles & Permissions
         Route::get('/roles', [RoleController::class, 'index'])->middleware('permission:roles:read');
         Route::get('/permissions', [RoleController::class, 'permissions'])->middleware('permission:roles:read');
+        Route::post('/roles', [RoleController::class, 'store'])->middleware(['permission:roles:manage', 'idempotent']);
+        Route::put('/roles/{id}', [RoleController::class, 'update'])->middleware(['permission:roles:manage', 'idempotent']);
+        Route::delete('/roles/{id}', [RoleController::class, 'destroy'])->middleware(['permission:roles:manage', 'idempotent']);
 
         // User Administration
         Route::get('/users', [UserController::class, 'index'])->middleware('permission:users:read');
@@ -225,6 +229,7 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/admin/customers/next-account-number', [CustomerAccountAdminController::class, 'nextAccountNumber'])->middleware('permission:customer_accounts:manage');
         Route::post('/admin/customers', [CustomerAccountAdminController::class, 'store'])->middleware(['permission:customer_accounts:manage', 'idempotent']);
         Route::get('/admin/customers/{id}', [CustomerAccountAdminController::class, 'show'])->middleware('permission:customer_accounts:view');
+        Route::get('/admin/customers/{customerId}/payment-credit', [CustomerPaymentCreditController::class, 'admin'])->middleware('permission:customer_accounts:view');
         Route::put('/admin/customers/{id}', [CustomerAccountAdminController::class, 'update'])->middleware(['permission:customer_accounts:manage', 'idempotent']);
         Route::put('/admin/customers/{id}/status', [CustomerAccountAdminController::class, 'updateStatus'])->middleware(['permission:customer_accounts:manage', 'idempotent']);
         Route::get('/admin/customers/{id}/buyer-profiles', [CustomerAccountAdminController::class, 'buyerProfiles'])->middleware('permission:buyer_profiles:view');
@@ -233,6 +238,7 @@ Route::prefix('v1')->group(function (): void {
         // In-App Announcements (Decision W34 / P1-12)
         // User-facing active announcements and interaction states
         Route::get('/announcements/active', [AnnouncementController::class, 'active'])->middleware('permission:announcements:view');
+        Route::get('/announcements/bulletin-board', [AnnouncementController::class, 'bulletinBoard'])->middleware('permission:announcements:view');
         Route::post('/announcements/{id}/seen', [AnnouncementController::class, 'seen'])->middleware('permission:announcements:view');
         Route::post('/announcements/{id}/acknowledge', [AnnouncementController::class, 'acknowledge'])->middleware('permission:announcements:view');
         Route::post('/announcements/{id}/dismiss', [AnnouncementController::class, 'dismiss'])->middleware('permission:announcements:view');
@@ -322,10 +328,12 @@ Route::prefix('v1')->group(function (): void {
 
         // Versioned manual payment routing, instruction and deadline snapshots (P3-10).
         // P3-06 remains the only owner of a real gateway attempt/provider confirmation.
+        Route::get('/payment-policy-images/{id}', [PaymentPolicyController::class, 'image'])->whereNumber('id');
         Route::get('/admin/payment-policies', [PaymentPolicyController::class, 'index'])->middleware('permission:payment_policies:view');
         Route::post('/admin/payment-policies', [PaymentPolicyController::class, 'store'])->middleware(['permission:payment_policies:manage', 'idempotent']);
         Route::post('/admin/payment-policies/{id}/publish', [PaymentPolicyController::class, 'publish'])->middleware(['permission:payment_policies:manage', 'idempotent']);
         Route::get('/portal/payment-groups', [PaymentPolicyController::class, 'portalIndex'])->middleware('permission:proofs:upload');
+        Route::get('/portal/customers/{customerId}/payment-credit', [CustomerPaymentCreditController::class, 'portal'])->middleware('permission:billing:read_own');
         Route::post('/portal/payment-groups/manual-instruction', [PaymentPolicyController::class, 'issueManualInstruction'])->middleware(['permission:proofs:upload', 'idempotent']);
 
         // Customer-selected manual payment proofs and their independent teller-review queue (P3-05)

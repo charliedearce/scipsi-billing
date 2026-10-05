@@ -56,6 +56,7 @@ class DatabaseSeeder extends Seeder
 
             // Roles & Permissions
             ['name' => 'roles:read', 'category' => 'Identity', 'description' => 'View available roles and permissions'],
+            ['name' => 'roles:manage', 'category' => 'Identity', 'description' => 'Manage organization roles and their permission bundles'],
             ['name' => 'roles:assign', 'category' => 'Identity', 'description' => 'Assign roles to users'],
 
             // Configuration
