@@ -1,10 +1,9 @@
 <template>
   <div class="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
-    <section
-      class="rounded-2xl bg-white border border-slate-200 p-6 flex items-center justify-between"
+    <section class="art-card p-6 flex flex-wrap items-center justify-between gap-4"
       ><div
-        ><h1 class="text-xl font-bold">PPA Clearance Policy</h1
-        ><p class="text-sm text-slate-500 mt-1"
+        ><h1 class="text-xl font-bold text-g-900">PPA Clearance Policy</h1
+        ><p class="text-sm text-g-500 mt-1"
           >Versioned policy controls whether a qualifying VIP credit status can be accepted by PPA.
           It never changes paid/unpaid status.</p
         ></div

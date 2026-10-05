@@ -396,7 +396,12 @@
             </template>
           </ElTableColumn>
           <ElTableColumn prop="body_template" label="Template Text" min-width="250" />
-          <ElTableColumn label="Actions" width="180">
+          <ElTableColumn
+            label="Actions"
+            width="180"
+            class-name="mobile-table-actions"
+            label-class-name="mobile-table-actions"
+          >
             <template #default="{ row }">
               <div class="flex items-center gap-1">
                 <ElButton

@@ -73,7 +73,13 @@
               <span v-else class="text-xs text-warning">Unpublished Draft</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="Actions" width="260" align="right">
+          <ElTableColumn
+            label="Actions"
+            width="260"
+            align="right"
+            class-name="mobile-table-actions"
+            label-class-name="mobile-table-actions"
+          >
             <template #default="{ row }">
               <ElButton size="small" type="primary" link @click="openEditor(row)">
                 Open Studio
@@ -184,7 +190,13 @@
               }}</ElTag>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="Actions" width="160" align="right">
+          <ElTableColumn
+            label="Actions"
+            width="160"
+            align="right"
+            class-name="mobile-table-actions"
+            label-class-name="mobile-table-actions"
+          >
             <template #default="{ row }">
               <ElButton
                 v-if="row.status === 'ACTIVE'"
