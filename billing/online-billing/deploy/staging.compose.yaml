@@ -28,39 +28,41 @@ services:
     image: scipsi-online-api:staging-git
     build: ./apps/api
     pull_policy: never
-    env_file: /root/scipsi-staging/staging.env
     secrets: [postgres_password]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
-    volumes: [/var/lib/docker/volumes/v5txsjklyp7ejjfqivx9dmft_api-private-storage/_data:/var/www/html/storage/app/private]
+    volumes:
+      - /var/lib/docker/volumes/v5txsjklyp7ejjfqivx9dmft_api-private-storage/_data:/var/www/html/storage/app/private
+      - /root/scipsi-staging/staging.env:/var/www/html/.env:ro
     restart: unless-stopped
   worker:
     image: scipsi-online-api:staging-git
     pull_policy: never
-    env_file: /root/scipsi-staging/staging.env
     secrets: [postgres_password]
     depends_on:
       api: {condition: service_started}
-    volumes: [/var/lib/docker/volumes/v5txsjklyp7ejjfqivx9dmft_api-private-storage/_data:/var/www/html/storage/app/private]
+    volumes:
+      - /var/lib/docker/volumes/v5txsjklyp7ejjfqivx9dmft_api-private-storage/_data:/var/www/html/storage/app/private
+      - /root/scipsi-staging/staging.env:/var/www/html/.env:ro
     command: [php, artisan, queue:work, redis, --queue=default, --sleep=1, --tries=1, --timeout=120]
     restart: unless-stopped
   scheduler:
     image: scipsi-online-api:staging-git
     pull_policy: never
-    env_file: /root/scipsi-staging/staging.env
     secrets: [postgres_password]
     depends_on:
       api: {condition: service_started}
+    volumes: [/root/scipsi-staging/staging.env:/var/www/html/.env:ro]
     command: [php, artisan, schedule:work]
     restart: unless-stopped
   reverb:
     image: scipsi-online-api:staging-git
     pull_policy: never
-    env_file: /root/scipsi-staging/staging.env
     secrets: [postgres_password]
     depends_on:
       api: {condition: service_started}
+    volumes: [/root/scipsi-staging/staging.env:/var/www/html/.env:ro]
     command: [php, artisan, reverb:start, --host=0.0.0.0, --port=8080]
     restart: unless-stopped
   gateway:
