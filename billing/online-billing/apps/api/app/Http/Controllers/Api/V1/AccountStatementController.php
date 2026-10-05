@@ -39,7 +39,11 @@ class AccountStatementController extends Controller
 
     public function generate(Request $request): JsonResponse
     {
-        $data = $request->validate(['customer_id' => 'required|integer', 'as_of_date' => 'required|date_format:Y-m-d|before_or_equal:today', 'location_id' => 'nullable|integer']);
+        $data = $request->validate([
+            'customer_id' => 'required|integer',
+            'as_of_date' => 'required|date_format:Y-m-d|before_or_equal:'.now('Asia/Manila')->toDateString(),
+            'location_id' => 'nullable|integer',
+        ]);
         $user = $request->user();
         $locationId = $data['location_id'] ?? $user->locations()->wherePivot('is_primary', true)->value('locations.id') ?? $user->locations()->first()?->id;
         if ($locationId !== null && ! $user->canAccessLocation((int) $locationId)) {

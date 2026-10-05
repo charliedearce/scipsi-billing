@@ -13,13 +13,14 @@ class AccountStatement extends Model
 
     protected $fillable = [
         'organization_id', 'location_id', 'customer_id', 'statement_number', 'as_of_date', 'currency',
-        'invoice_total', 'payment_total', 'outstanding_total', 'customer_snapshot', 'status',
+        'invoice_total', 'payment_total', 'cash_applied_total', 'withholding_applied_total', 'outstanding_total', 'customer_snapshot', 'status',
         'generated_by_user_id', 'generated_at', 'voided_by_user_id', 'voided_at', 'void_reason',
     ];
 
     protected $casts = [
         'as_of_date' => 'date:Y-m-d', 'generated_at' => 'datetime', 'voided_at' => 'datetime',
-        'invoice_total' => 'string', 'payment_total' => 'string', 'outstanding_total' => 'string', 'customer_snapshot' => 'array',
+        'invoice_total' => 'string', 'payment_total' => 'string', 'cash_applied_total' => 'string',
+        'withholding_applied_total' => 'string', 'outstanding_total' => 'string', 'customer_snapshot' => 'array',
     ];
 
     public function customer(): BelongsTo

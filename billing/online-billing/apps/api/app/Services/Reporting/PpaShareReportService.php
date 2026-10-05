@@ -5,8 +5,9 @@ namespace App\Services\Reporting;
 use App\Models\Invoice;
 use App\Models\ReceiptAllocation;
 use App\Models\User;
+use App\Services\Billing\CustomerPaymentCreditService;
+use App\Services\Billing\InvoiceSettlementService;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -43,6 +44,7 @@ class PpaShareReportService
 
         $invoices = $query->with('customer:id,account_number,name')->orderByDesc('business_date')->orderByDesc('id')->get();
         $applied = $this->appliedByInvoice($invoices->pluck('id')->all());
+        $creditApplied = app(CustomerPaymentCreditService::class)->applicationsForInvoices($invoices->pluck('id')->all());
         $receipts = $this->receiptsByInvoice($invoices->pluck('id')->all());
         $paid = $invoices->filter(function (Invoice $invoice) use ($applied): bool {
             $settled = $applied[$invoice->id] ?? '0.00';
@@ -51,7 +53,7 @@ class PpaShareReportService
             return bccomp($settled, '0.00', 2) > 0 && bccomp($outstanding, '0.00', 2) <= 0;
         })->values();
 
-        $rows = $paid->map(function (Invoice $invoice) use ($applied, $receipts): array {
+        $rows = $paid->map(function (Invoice $invoice) use ($applied, $creditApplied, $receipts): array {
             return [
                 'invoice_number' => $invoice->invoice_number,
                 'business_date' => $invoice->business_date?->toDateString(),
@@ -61,6 +63,7 @@ class PpaShareReportService
                 'invoice_total' => $this->money($invoice->total_charge_amount),
                 'ppa_share' => $this->money($invoice->ppa_amount),
                 'applied_amount' => $applied[$invoice->id] ?? '0.00',
+                'customer_payment_credit_applied_amount' => $creditApplied[$invoice->id] ?? '0.00',
                 'receipts' => $receipts[$invoice->id] ?? [],
             ];
         })->all();
@@ -122,14 +125,7 @@ class PpaShareReportService
             return [];
         }
 
-        return ReceiptAllocation::query()
-            ->whereIn('invoice_id', $invoiceIds)
-            ->whereHas('receipt', fn ($query) => $query->where('status', 'POSTED'))
-            ->select('invoice_id', DB::raw('SUM(applied_amount) as amount'))
-            ->groupBy('invoice_id')
-            ->pluck('amount', 'invoice_id')
-            ->map(fn ($amount) => $this->money($amount))
-            ->all();
+        return app(InvoiceSettlementService::class)->appliedForInvoices($invoiceIds);
     }
 
     /** @param array<int, int> $invoiceIds

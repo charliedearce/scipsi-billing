@@ -100,32 +100,102 @@
             ><ElButton type="primary" :loading="downloadingPdf" @click="downloadPdf"
               >Download canonical PDF</ElButton
             ></div
-          ><div
-            class="grid grid-cols-1 gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-3 dark:bg-slate-800"
-            ><div
-              ><span class="block text-xs text-slate-500">Customer</span
-              ><b>{{ selected.customer?.name || selected.customer_snapshot?.name }}</b></div
-            ><div
-              ><span class="block text-xs text-slate-500">As of</span
-              ><b>{{ selected.as_of_date }}</b></div
-            ><div
-              ><span class="block text-xs text-slate-500">Outstanding</span
-              ><b>{{ money(selected.outstanding_total, selected.currency) }}</b></div
+          ><div class="grid grid-cols-2 gap-3 sm:grid-cols-3"
+            ><div v-for="fact in summaryFacts" :key="fact.label" class="art-card-xs px-4 py-3"
+              ><span class="block text-xs text-g-500">{{ fact.label }}</span
+              ><b class="text-sm text-g-900">{{ fact.value }}</b></div
             ></div
+          ><p v-if="hasBreakdown" class="text-xs text-g-500"
+            >Tax is the amount stored on each posted invoice. Cash and withholding are the
+            collections applied on or before the as-of date.</p
           ><ElTable :data="selected.items || []" stripe
-            ><ElTableColumn prop="invoice_number" label="Invoice" min-width="150" /><ElTableColumn
+            ><ElTableColumn v-if="hasBreakdown" type="expand"
+              ><template #default="{ row }"
+                ><div class="space-y-3 px-2 py-2"
+                  ><div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4"
+                    ><div
+                      ><span class="block text-xs text-g-500">Days open</span
+                      ><span class="text-g-900">{{ row.snapshot?.days_open ?? '—' }}</span></div
+                    ><div
+                      ><span class="block text-xs text-g-500">TIN</span
+                      ><span class="text-g-900">{{ row.snapshot?.buyer_tin || '—' }}</span></div
+                    ><div
+                      ><span class="block text-xs text-g-500">Vessel</span
+                      ><span class="text-g-900">{{
+                        shipmentLabel(row.snapshot?.vessel_name, row.snapshot?.voyage)
+                      }}</span></div
+                    ><div
+                      ><span class="block text-xs text-g-500">Net</span
+                      ><span class="text-g-900">{{ snapshotMoney(row, 'net_amount') }}</span></div
+                    ><div
+                      ><span class="block text-xs text-g-500">Fuel surcharge</span
+                      ><span class="text-g-900">{{
+                        snapshotMoney(row, 'fuel_surcharge_amount')
+                      }}</span></div
+                    ><div
+                      ><span class="block text-xs text-g-500">PPA share</span
+                      ><span class="text-g-900">{{ snapshotMoney(row, 'ppa_amount') }}</span></div
+                    ><div
+                      ><span class="block text-xs text-g-500">Discount</span
+                      ><span class="text-g-900">{{
+                        snapshotMoney(row, 'discount_amount')
+                      }}</span></div
+                    ></div
+                  ><ElTable
+                    :data="row.snapshot?.receipts || []"
+                    size="small"
+                    empty-text="No collections applied"
+                    ><ElTableColumn
+                      prop="receipt_number"
+                      label="Receipt"
+                      min-width="140"
+                    /><ElTableColumn prop="business_date" label="Date" width="115" /><ElTableColumn
+                      label="Cash"
+                      align="right"
+                      ><template #default="{ row: receipt }">{{
+                        money(receipt.cash_applied_amount, selected.currency)
+                      }}</template></ElTableColumn
+                    ><ElTableColumn label="Withholding" align="right"
+                      ><template #default="{ row: receipt }">{{
+                        money(receipt.withholding_applied_amount, selected.currency)
+                      }}</template></ElTableColumn
+                    ><ElTableColumn label="Applied" align="right"
+                      ><template #default="{ row: receipt }">{{
+                        money(receipt.applied_amount, selected.currency)
+                      }}</template></ElTableColumn
+                    ></ElTable
+                  ></div
+                ></template
+              ></ElTableColumn
+            ><ElTableColumn prop="invoice_number" label="Invoice" min-width="140" /><ElTableColumn
               prop="business_date"
               label="Date"
               width="115"
-            /><ElTableColumn label="Invoice" align="right"
+            /><ElTableColumn v-if="hasBreakdown" label="Buyer" min-width="160"
+              ><template #default="{ row }">{{
+                row.snapshot?.buyer_name || '—'
+              }}</template></ElTableColumn
+            ><ElTableColumn label="Charge" align="right" min-width="120"
               ><template #default="{ row }">{{
                 money(row.invoice_amount, selected.currency)
               }}</template></ElTableColumn
-            ><ElTableColumn label="Applied" align="right"
+            ><ElTableColumn v-if="hasBreakdown" label="Tax" align="right" min-width="110"
+              ><template #default="{ row }">{{
+                snapshotMoney(row, 'tax_amount')
+              }}</template></ElTableColumn
+            ><ElTableColumn v-if="hasBreakdown" label="Cash" align="right" min-width="110"
+              ><template #default="{ row }">{{
+                snapshotMoney(row, 'cash_applied_amount')
+              }}</template></ElTableColumn
+            ><ElTableColumn v-if="hasBreakdown" label="Withholding" align="right" min-width="120"
+              ><template #default="{ row }">{{
+                snapshotMoney(row, 'withholding_applied_amount')
+              }}</template></ElTableColumn
+            ><ElTableColumn v-if="!hasBreakdown" label="Applied" align="right" min-width="120"
               ><template #default="{ row }">{{
                 money(row.payment_amount, selected.currency)
               }}</template></ElTableColumn
-            ><ElTableColumn label="Outstanding" align="right"
+            ><ElTableColumn label="Balance" align="right" min-width="120"
               ><template #default="{ row }">{{
                 money(row.outstanding_amount, selected.currency)
               }}</template></ElTableColumn
@@ -138,7 +208,7 @@
 </template>
 
 <script setup lang="ts">
-  import { onMounted, reactive, ref } from 'vue'
+  import { computed, onMounted, reactive, ref } from 'vue'
   import { ElMessage } from 'element-plus'
   import { Plus, Refresh } from '@element-plus/icons-vue'
   import { fetchAdminCustomers } from '@/api/registration'
@@ -147,7 +217,9 @@
     fetchAccountStatements,
     generateAccountStatement,
     downloadAccountStatementArtifact,
-    type AccountStatement
+    type AccountStatement,
+    type AccountStatementItem,
+    type AccountStatementLineSnapshot
   } from '@/api/accountStatements'
   defineOptions({ name: 'AccountStatements' })
   const loading = ref(false)
@@ -229,5 +301,68 @@
   const disableFuture = (date: Date) => date > new Date(new Date().setHours(0, 0, 0, 0))
   const money = (value: string, currency: string) =>
     new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(Number(value))
+  const hasBreakdown = computed(() =>
+    (selected.value?.items || []).some(
+      (item) => item.snapshot && 'cash_applied_amount' in item.snapshot
+    )
+  )
+  const summaryFacts = computed(() => {
+    const statement = selected.value
+    if (!statement) return []
+    const currency = statement.currency
+    const facts = [
+      {
+        label: 'Account',
+        value:
+          statement.customer?.account_number || statement.customer_snapshot?.account_number || '—'
+      },
+      {
+        label: 'Customer',
+        value: statement.customer?.name || statement.customer_snapshot?.name || '—'
+      },
+      { label: 'As of', value: statement.as_of_date },
+      { label: 'Charges', value: money(statement.invoice_total, currency) }
+    ]
+    if (hasBreakdown.value) {
+      facts.push(
+        { label: 'Tax included', value: money(sumSnapshot('tax_amount'), currency) },
+        { label: 'Cash applied', value: money(statement.cash_applied_total || '0.00', currency) },
+        {
+          label: 'Withholding applied',
+          value: money(statement.withholding_applied_total || '0.00', currency)
+        }
+      )
+    } else {
+      facts.push({ label: 'Applied', value: money(statement.payment_total, currency) })
+    }
+    facts.push({ label: 'Balance due', value: money(statement.outstanding_total, currency) })
+    return facts
+  })
+  const snapshotMoney = (row: AccountStatementItem, key: keyof AccountStatementLineSnapshot) => {
+    const value = row.snapshot?.[key]
+    if (typeof value !== 'string' || !selected.value) return '—'
+    return money(value, selected.value.currency)
+  }
+  const shipmentLabel = (vessel?: string | null, voyage?: string | null) => {
+    const parts = [vessel, voyage].filter((part) => part && part.trim() !== '')
+    return parts.length ? parts.join(' / ') : '—'
+  }
+  const sumSnapshot = (key: 'tax_amount') =>
+    (selected.value?.items || []).reduce(
+      (total, item) => addMoney(total, item.snapshot?.[key] || '0.00'),
+      '0.00'
+    )
+  const addMoney = (left: string, right: string) => {
+    const cents = (value: string) => {
+      const [whole, fraction = ''] = value.split('.')
+      const sign = whole.startsWith('-') ? -1 : 1
+      const pesos = Math.abs(Number(whole || '0'))
+      return sign * (pesos * 100 + Number(fraction.padEnd(2, '0').slice(0, 2)))
+    }
+    const total = cents(left) + cents(right)
+    const sign = total < 0 ? '-' : ''
+    const absolute = Math.abs(total)
+    return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`
+  }
   onMounted(load)
 </script>

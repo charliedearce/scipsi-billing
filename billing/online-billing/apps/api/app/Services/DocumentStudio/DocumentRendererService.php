@@ -222,10 +222,28 @@ class DocumentRendererService
             return [
                 'organization' => ['name' => 'SOUTH COTABATO INTEGRATED PORT SERVICES, INC.'],
                 'statement' => ['statement_number' => 'SOA-0000001234', 'as_of_date' => date('Y-m-d'), 'currency' => 'PHP'],
-                'customer' => ['name' => 'SAMPLE CUSTOMER, INC.'],
-                'totals' => ['outstanding_total' => '8,400.00'],
+                'customer' => ['account_number' => '11001-0001', 'name' => 'SAMPLE CUSTOMER, INC.'],
+                'totals' => [
+                    'invoice_total' => '10,000.00',
+                    'tax_total' => '1,071.43',
+                    'payment_total' => '1,600.00',
+                    'cash_applied_total' => '1,500.00',
+                    'withholding_applied_total' => '100.00',
+                    'outstanding_total' => '8,400.00',
+                    'open_invoice_count' => '1',
+                ],
                 'items' => [
-                    ['invoice_number' => 'SI-0000000123', 'business_date' => date('Y-m-d'), 'invoice_amount' => '10,000.00', 'payment_amount' => '1,600.00', 'outstanding_amount' => '8,400.00'],
+                    [
+                        'invoice_number' => 'SI-0000000123',
+                        'business_date' => date('Y-m-d'),
+                        'buyer_name' => 'SAMPLE CUSTOMER, INC.',
+                        'invoice_amount' => '10,000.00',
+                        'tax_amount' => '1,071.43',
+                        'cash_applied_amount' => '1,500.00',
+                        'withholding_applied_amount' => '100.00',
+                        'outstanding_amount' => '8,400.00',
+                        'settled_by' => 'CR-0000000456',
+                    ],
                 ],
             ];
         }

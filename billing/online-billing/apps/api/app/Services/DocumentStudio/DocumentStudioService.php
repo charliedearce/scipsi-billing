@@ -989,23 +989,64 @@ class DocumentStudioService
     /** Default non-fiscal account statement layout. Values come from an immutable statement snapshot. */
     public function getDefaultAccountStatementLayout(): array
     {
-        return $this->getDefaultOperationalLayout(
-            title: 'STATEMENT OF ACCOUNT',
-            referenceField: 'statement.statement_number',
-            dateField: 'statement.as_of_date',
-            partyLabel: 'Account',
-            partyField: 'customer.name',
-            tableColumns: [
-                ['label' => 'Invoice', 'field' => 'invoice_number', 'align' => 'left', 'width_pct' => 25],
-                ['label' => 'Date', 'field' => 'business_date', 'align' => 'left', 'width_pct' => 18],
-                ['label' => 'Invoice', 'field' => 'invoice_amount', 'align' => 'right', 'width_pct' => 19],
-                ['label' => 'Applied', 'field' => 'payment_amount', 'align' => 'right', 'width_pct' => 19],
-                ['label' => 'Outstanding', 'field' => 'outstanding_amount', 'align' => 'right', 'width_pct' => 19],
+        return [
+            'page' => ['paper_size' => 'LETTER', 'orientation' => 'LANDSCAPE', 'margins' => ['top' => 12, 'right' => 12, 'bottom' => 12, 'left' => 12]],
+            'bands' => [
+                'header' => [
+                    'height_mm' => 32,
+                    'elements' => [
+                        ['type' => 'bound_text', 'field' => 'organization.name', 'x_mm' => 0, 'y_mm' => 0, 'width_mm' => 150, 'height_mm' => 6, 'font_size_pt' => 11, 'font_weight' => 'bold'],
+                        ['type' => 'static_text', 'text' => 'STATEMENT OF ACCOUNT', 'x_mm' => 150, 'y_mm' => 0, 'width_mm' => 105, 'height_mm' => 7, 'font_size_pt' => 12, 'font_weight' => 'bold', 'align' => 'right'],
+                        ['type' => 'static_text', 'text' => 'Reference:', 'x_mm' => 175, 'y_mm' => 9, 'width_mm' => 28, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'bound_text', 'field' => 'statement.statement_number', 'x_mm' => 204, 'y_mm' => 9, 'width_mm' => 51, 'height_mm' => 5, 'font_size_pt' => 8, 'font_weight' => 'bold', 'align' => 'right'],
+                        ['type' => 'static_text', 'text' => 'As of:', 'x_mm' => 175, 'y_mm' => 15, 'width_mm' => 28, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'bound_text', 'field' => 'statement.as_of_date', 'x_mm' => 204, 'y_mm' => 15, 'width_mm' => 51, 'height_mm' => 5, 'font_size_pt' => 8, 'font_weight' => 'bold', 'align' => 'right'],
+                        ['type' => 'static_text', 'text' => 'Currency:', 'x_mm' => 175, 'y_mm' => 21, 'width_mm' => 28, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'bound_text', 'field' => 'statement.currency', 'x_mm' => 204, 'y_mm' => 21, 'width_mm' => 51, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'static_text', 'text' => 'Account:', 'x_mm' => 0, 'y_mm' => 12, 'width_mm' => 22, 'height_mm' => 5, 'font_size_pt' => 8],
+                        ['type' => 'bound_text', 'field' => 'customer.account_number', 'x_mm' => 23, 'y_mm' => 12, 'width_mm' => 140, 'height_mm' => 5, 'font_size_pt' => 8, 'font_weight' => 'bold'],
+                        ['type' => 'static_text', 'text' => 'Customer:', 'x_mm' => 0, 'y_mm' => 18, 'width_mm' => 22, 'height_mm' => 5, 'font_size_pt' => 8],
+                        ['type' => 'bound_text', 'field' => 'customer.name', 'x_mm' => 23, 'y_mm' => 18, 'width_mm' => 140, 'height_mm' => 5, 'font_size_pt' => 8, 'font_weight' => 'bold'],
+                    ],
+                ],
+                'details' => [
+                    'elements' => [
+                        ['type' => 'table', 'x_mm' => 0, 'y_mm' => 0, 'width_mm' => 255, 'height_mm' => 90, 'columns' => [
+                            ['label' => 'Invoice', 'field' => 'invoice_number', 'align' => 'left', 'width_pct' => 12],
+                            ['label' => 'Date', 'field' => 'business_date', 'align' => 'left', 'width_pct' => 9],
+                            ['label' => 'Buyer', 'field' => 'buyer_name', 'align' => 'left', 'width_pct' => 16],
+                            ['label' => 'Charge', 'field' => 'invoice_amount', 'align' => 'right', 'width_pct' => 10],
+                            ['label' => 'Tax', 'field' => 'tax_amount', 'align' => 'right', 'width_pct' => 9],
+                            ['label' => 'Cash', 'field' => 'cash_applied_amount', 'align' => 'right', 'width_pct' => 10],
+                            ['label' => 'Withholding', 'field' => 'withholding_applied_amount', 'align' => 'right', 'width_pct' => 11],
+                            ['label' => 'Balance', 'field' => 'outstanding_amount', 'align' => 'right', 'width_pct' => 10],
+                            ['label' => 'Receipts', 'field' => 'settled_by', 'align' => 'left', 'width_pct' => 13],
+                        ]],
+                    ],
+                ],
+                'summary' => [
+                    'height_mm' => 32,
+                    'elements' => [
+                        ['type' => 'static_text', 'text' => 'Charges:', 'x_mm' => 155, 'y_mm' => 0, 'width_mm' => 50, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'bound_text', 'field' => 'totals.invoice_total', 'x_mm' => 207, 'y_mm' => 0, 'width_mm' => 48, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'static_text', 'text' => 'Tax included:', 'x_mm' => 155, 'y_mm' => 6, 'width_mm' => 50, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'bound_text', 'field' => 'totals.tax_total', 'x_mm' => 207, 'y_mm' => 6, 'width_mm' => 48, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'static_text', 'text' => 'Cash applied:', 'x_mm' => 155, 'y_mm' => 12, 'width_mm' => 50, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'bound_text', 'field' => 'totals.cash_applied_total', 'x_mm' => 207, 'y_mm' => 12, 'width_mm' => 48, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'static_text', 'text' => 'Withholding applied:', 'x_mm' => 145, 'y_mm' => 18, 'width_mm' => 60, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'bound_text', 'field' => 'totals.withholding_applied_total', 'x_mm' => 207, 'y_mm' => 18, 'width_mm' => 48, 'height_mm' => 5, 'font_size_pt' => 8, 'align' => 'right'],
+                        ['type' => 'static_text', 'text' => 'Balance due:', 'x_mm' => 155, 'y_mm' => 24, 'width_mm' => 50, 'height_mm' => 6, 'font_size_pt' => 9, 'font_weight' => 'bold', 'align' => 'right'],
+                        ['type' => 'bound_text', 'field' => 'totals.outstanding_total', 'x_mm' => 207, 'y_mm' => 24, 'width_mm' => 48, 'height_mm' => 6, 'font_size_pt' => 10, 'font_weight' => 'bold', 'align' => 'right'],
+                    ],
+                ],
+                'footer' => [
+                    'height_mm' => 12,
+                    'elements' => [
+                        ['type' => 'static_text', 'text' => 'Non-fiscal receivables communication. Amounts are the values stored on each posted invoice and the collections applied on or before the as-of date. It does not issue, amend, or settle a document.', 'x_mm' => 0, 'y_mm' => 1, 'width_mm' => 255, 'height_mm' => 10, 'font_size_pt' => 7, 'align' => 'center'],
+                    ],
+                ],
             ],
-            totalLabel: 'Outstanding total',
-            totalField: 'totals.outstanding_total',
-            footer: 'Non-fiscal receivables communication. It does not issue, amend, or settle a document.',
-        );
+        ];
     }
 
     /** Default non-fiscal operational layout for a yellow invoice or white receipt transmittal. */

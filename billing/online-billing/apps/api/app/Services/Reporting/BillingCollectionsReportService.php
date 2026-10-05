@@ -9,6 +9,7 @@ use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -56,10 +57,11 @@ class BillingCollectionsReportService
                 'timezone' => self::TIMEZONE,
                 'filters' => $this->publicFilters($resolved),
                 'scope_notice' => 'Only documents inside the caller organization and authorized location scope are included.',
-                'interpretation_notice' => 'Invoice issuance and posted collections are separate activity streams. Their difference for this period is not an account balance, aging result, or fiscal reconciliation. Acknowledgement receipts appear here for internal settlement visibility but counts_as_official_receipt=false excludes them from BIR-facing Official Receipt registers.',
+                'interpretation_notice' => 'Invoice issuance, posted collections, and customer payment credit use are separate activity streams. Credit applications settle bills without new cash collections. Their difference for this period is not an account balance, aging result, or fiscal reconciliation. Acknowledgement receipts appear here for internal settlement visibility but counts_as_official_receipt=false excludes them from BIR-facing Official Receipt registers.',
                 'row_limit' => self::ROW_LIMIT,
             ],
             'totals_by_currency' => $this->aggregateRows($rows),
+            'payment_credit_activity_by_currency' => $this->creditActivity($actor, $resolved),
             'rows' => array_values(array_slice($rows, ($page - 1) * $perPage, $perPage)),
             'pagination' => [
                 'current_page' => $page,
@@ -159,6 +161,44 @@ class BillingCollectionsReportService
         }
 
         return $query;
+    }
+
+    /** @param array<string, mixed> $filters @return list<array<string, string>> */
+    private function creditActivity(User $actor, array $filters): array
+    {
+        $query = DB::table('customer_payment_credit_movements as movements')
+            ->join('customer_payment_credits as credits', 'credits.id', '=', 'movements.credit_id')
+            ->join('receipts as source_receipts', 'source_receipts.id', '=', 'credits.source_receipt_id')
+            ->leftJoin('invoices as target_invoices', 'target_invoices.id', '=', 'movements.invoice_id')
+            ->where('credits.organization_id', $actor->organization_id)
+            ->whereIn('movements.type', ['CREATED', 'APPLIED', 'REVERSED'])
+            ->whereBetween('movements.created_at', [
+                Carbon::parse($filters['date_from'], self::TIMEZONE)->startOfDay()->utc(),
+                Carbon::parse($filters['date_to'], self::TIMEZONE)->endOfDay()->utc(),
+            ]);
+        if ($filters['customer_id'] !== null) {
+            $query->where('credits.customer_id', $filters['customer_id']);
+        }
+        $locationIds = $filters['location_id'] !== null
+            ? [$filters['location_id']]
+            : ($actor->hasRole('Administrator') ? null : $actor->locations()->pluck('locations.id')->all());
+        if ($locationIds !== null) {
+            $query->whereIn(DB::raw("CASE WHEN movements.type = 'APPLIED' THEN target_invoices.location_id ELSE source_receipts.location_id END"), $locationIds === [] ? [-1] : $locationIds);
+        }
+
+        $totals = [];
+        foreach ($query->select('credits.currency', 'movements.type', 'movements.amount')->get() as $movement) {
+            $currency = (string) $movement->currency;
+            $totals[$currency] ??= ['currency' => $currency, 'created_amount' => '0.00', 'applied_amount' => '0.00', 'reversed_amount' => '0.00'];
+            $key = match ($movement->type) {
+                'CREATED' => 'created_amount',
+                'APPLIED' => 'applied_amount',
+                default => 'reversed_amount',
+            };
+            $totals[$currency][$key] = bcadd($totals[$currency][$key], (string) $movement->amount, 2);
+        }
+
+        return array_values($totals);
     }
 
     /** @return array<int, array<string, mixed>> */

@@ -275,14 +275,22 @@ class AdminDashboardService
             ->where('receipts.status', 'POSTED')
             ->groupBy('allocations.invoice_id')
             ->selectRaw('allocations.invoice_id, SUM(allocations.applied_amount) as applied_amount');
+        $creditApplied = DB::table('customer_payment_credit_movements as movements')
+            ->join('customer_payment_credits as credits', 'credits.id', '=', 'movements.credit_id')
+            ->join('receipts as source_receipts', 'source_receipts.id', '=', 'credits.source_receipt_id')
+            ->where('movements.type', 'APPLIED')
+            ->where('source_receipts.status', 'POSTED')
+            ->groupBy('movements.invoice_id')
+            ->selectRaw('movements.invoice_id, SUM(movements.amount) as applied_amount');
 
         $rows = DB::table('invoices')
             ->leftJoinSub($applied, 'applied', 'applied.invoice_id', '=', 'invoices.id')
+            ->leftJoinSub($creditApplied, 'credit_applied', 'credit_applied.invoice_id', '=', 'invoices.id')
             ->where('invoices.organization_id', $organizationId)
             ->where('invoices.status', Invoice::STATUS_POSTED)
-            ->whereRaw('(invoices.total_charge_amount - COALESCE(applied.applied_amount, 0)) > 0')
+            ->whereRaw('(invoices.total_charge_amount - COALESCE(applied.applied_amount, 0) - COALESCE(credit_applied.applied_amount, 0)) > 0')
             ->groupBy('invoices.currency')
-            ->selectRaw('invoices.currency, COUNT(*) as open_count, SUM(invoices.total_charge_amount - COALESCE(applied.applied_amount, 0)) as outstanding')
+            ->selectRaw('invoices.currency, COUNT(*) as open_count, SUM(invoices.total_charge_amount - COALESCE(applied.applied_amount, 0) - COALESCE(credit_applied.applied_amount, 0)) as outstanding')
             ->get();
 
         $open = [];

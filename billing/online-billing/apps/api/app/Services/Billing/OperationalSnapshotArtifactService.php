@@ -114,6 +114,30 @@ class OperationalSnapshotArtifactService
     {
         $statement->loadMissing(['organization', 'items']);
 
+        $taxTotal = '0.00';
+        $items = $statement->items->map(function ($item) use (&$taxTotal): array {
+            $snapshot = is_array($item->snapshot) ? $item->snapshot : [];
+            $tax = bcadd((string) ($snapshot['tax_amount'] ?? '0'), '0', 2);
+            $taxTotal = bcadd($taxTotal, $tax, 2);
+            $receipts = is_array($snapshot['receipts'] ?? null) ? $snapshot['receipts'] : [];
+            $settledBy = collect($receipts)->pluck('receipt_number')->filter()->implode(', ');
+
+            return [
+                'invoice_number' => $item->invoice_number,
+                'business_date' => $item->business_date?->toDateString(),
+                'buyer_name' => $snapshot['buyer_name'] ?? '',
+                'buyer_tin' => $snapshot['buyer_tin'] ?? '',
+                'days_open' => (string) ($snapshot['days_open'] ?? ''),
+                'invoice_amount' => (string) $item->invoice_amount,
+                'tax_amount' => $tax,
+                'payment_amount' => (string) $item->payment_amount,
+                'cash_applied_amount' => (string) ($snapshot['cash_applied_amount'] ?? '0.00'),
+                'withholding_applied_amount' => (string) ($snapshot['withholding_applied_amount'] ?? '0.00'),
+                'outstanding_amount' => (string) $item->outstanding_amount,
+                'settled_by' => $settledBy !== '' ? $settledBy : '—',
+            ];
+        })->all();
+
         return [
             'organization' => ['name' => $statement->organization?->name ?? 'SCIPSI'],
             'statement' => [
@@ -126,16 +150,14 @@ class OperationalSnapshotArtifactService
             'customer' => $statement->customer_snapshot,
             'totals' => [
                 'invoice_total' => (string) $statement->invoice_total,
+                'tax_total' => $taxTotal,
                 'payment_total' => (string) $statement->payment_total,
+                'cash_applied_total' => (string) ($statement->cash_applied_total ?? '0.00'),
+                'withholding_applied_total' => (string) ($statement->withholding_applied_total ?? '0.00'),
                 'outstanding_total' => (string) $statement->outstanding_total,
+                'open_invoice_count' => (string) $statement->items->count(),
             ],
-            'items' => $statement->items->map(fn ($item): array => [
-                'invoice_number' => $item->invoice_number,
-                'business_date' => $item->business_date?->toDateString(),
-                'invoice_amount' => (string) $item->invoice_amount,
-                'payment_amount' => (string) $item->payment_amount,
-                'outstanding_amount' => (string) $item->outstanding_amount,
-            ])->all(),
+            'items' => $items,
         ];
     }
 
