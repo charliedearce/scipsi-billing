@@ -391,6 +391,8 @@
       case 'QUEUE':
       case 'QUEUE_UPDATE':
         return { icon: 'ri:time-line', iconClass: 'bg-warning/10 text-warning', tag: 'warning' }
+      case 'TELLER_BILLING':
+        return { icon: 'ri:user-voice-line', iconClass: 'bg-warning/10 text-warning', tag: 'warning' }
       case 'INVOICE':
       case 'BILL_READY':
         return {
@@ -401,6 +403,7 @@
       case 'PAYMENT':
       case 'PAYMENT_REMINDER':
       case 'PROOF_REVIEW':
+      case 'TELLER_PAYMENT':
         return {
           icon: 'ri:bank-card-line',
           iconClass: 'bg-theme/10 text-theme',
@@ -481,6 +484,10 @@
   function notificationDestination(item: InAppNotification): string | null {
     const data = item.data || {}
     switch (normalizedType(item.type)) {
+      case 'TELLER_BILLING':
+        return '/billing-request-queue'
+      case 'TELLER_PAYMENT':
+        return '/payment-proof-review'
       case 'QUEUE':
       case 'QUEUE_UPDATE':
         return '/my-billing-requests'

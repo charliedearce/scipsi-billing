@@ -363,6 +363,16 @@ class BillingRequestQueueService
                 ],
             );
 
+            $this->notifications->publishToTellers(
+                (int) $request->organization_id,
+                (int) $request->location_id,
+                'TELLER_BILLING',
+                'Billing request waiting',
+                "Ticket #{$ticketNumber} is ready for teller review.",
+                "billing-request:{$request->id}:submitted",
+                ['billing_request_id' => $request->id],
+            );
+
             // 5. Outbound Transactional SMS Intent (Decision W31)
             $this->dispatchTransactionalNotice(
                 $request,
@@ -617,6 +627,16 @@ class BillingRequestQueueService
                 ],
                 'created_at' => $now,
             ]);
+
+            $this->notifications->publishToTellers(
+                (int) $request->organization_id,
+                (int) $request->location_id,
+                'TELLER_BILLING',
+                'Corrected billing request waiting',
+                "Ticket #{$request->ticket_number} is ready for teller review.",
+                "billing-request:{$request->id}:resubmitted:{$now->getTimestamp()}",
+                ['billing_request_id' => $request->id],
+            );
 
             $this->broadcastQueueRefresh($request, 'resubmitted');
 

@@ -330,6 +330,15 @@ class ManualPaymentProofService
             ]);
             $this->audit($submission, $actor, 'PAYMENT_PROOF_SUBMITTED', 'proofs:upload', 'Customer submitted a bank-payment proof.');
             $this->paymentPolicyService->markProofSubmitted($group, $actor);
+            $this->notifications->publishToTellers(
+                (int) $submission->organization_id,
+                null,
+                'TELLER_PAYMENT',
+                'Payment proof waiting',
+                'A customer payment proof is ready for teller verification.',
+                "payment-proof:{$submission->id}:submitted",
+                ['submission_id' => $submission->id],
+            );
 
             return $this->loadSubmission($submission);
         });
@@ -419,6 +428,15 @@ class ManualPaymentProofService
             ]);
             $this->audit($locked, $actor, 'PAYMENT_PROOF_RESUBMITTED', 'proofs:upload', 'Customer resubmitted a corrected bank-payment proof.');
             $this->paymentPolicyService->markProofSubmitted($group, $actor, true);
+            $this->notifications->publishToTellers(
+                (int) $locked->organization_id,
+                null,
+                'TELLER_PAYMENT',
+                'Corrected payment proof waiting',
+                'A corrected customer payment proof is ready for teller verification.',
+                "payment-proof:{$locked->id}:resubmission:{$nextRound}",
+                ['submission_id' => $locked->id],
+            );
 
             return $this->loadSubmission($locked);
         });

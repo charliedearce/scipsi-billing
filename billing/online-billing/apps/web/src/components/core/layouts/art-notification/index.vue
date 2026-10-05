@@ -210,6 +210,14 @@
     emit('update:value', false)
 
     const data = item.data || {}
+    if (item.type === 'TELLER_BILLING') {
+      router.push('/billing-request-queue')
+      return
+    }
+    if (item.type === 'TELLER_PAYMENT') {
+      router.push('/payment-proof-review')
+      return
+    }
     if (data.conversation_id) {
       mittBus.emit('openChat', { conversationId: Number(data.conversation_id) })
       return

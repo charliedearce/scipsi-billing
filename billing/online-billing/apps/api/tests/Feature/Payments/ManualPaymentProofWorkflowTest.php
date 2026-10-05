@@ -114,6 +114,8 @@ class ManualPaymentProofWorkflowTest extends TestCase
             ->assertJsonPath('data.status', 'SUBMITTED');
         $this->assertDatabaseCount('receipts', 0);
         $this->assertDatabaseCount('receipt_allocations', 0);
+        $this->assertDatabaseHas('in_app_notifications', ['user_id' => $this->tellerOne->id, 'type' => 'TELLER_PAYMENT']);
+        $this->assertDatabaseHas('in_app_notifications', ['user_id' => $this->tellerTwo->id, 'type' => 'TELLER_PAYMENT']);
         $this->assertDatabaseHas('manual_payment_submission_items', ['invoice_id' => $firstInvoice->id, 'requested_amount' => $firstInvoice->total_charge_amount]);
         $this->assertDatabaseHas('manual_payment_submission_items', ['invoice_id' => $secondInvoice->id, 'requested_amount' => $secondInvoice->total_charge_amount]);
 
@@ -226,6 +228,7 @@ class ManualPaymentProofWorkflowTest extends TestCase
         $this->assertTrue($firstProofSubmittedAt->equalTo($freshGroup->first_proof_submitted_at));
         $this->assertNotNull($freshGroup->review_due_at);
         $this->assertSame('PROOF_SUBMITTED', $freshGroup->status);
+        $this->assertSame(2, \App\Models\InAppNotification::query()->where('user_id', $this->tellerOne->id)->where('type', 'TELLER_PAYMENT')->count());
         $this->assertDatabaseCount('manual_payment_submission_proofs', 2);
         $this->assertDatabaseHas('manual_payment_submission_events', ['manual_payment_submission_id' => $submission->id, 'event_type' => 'REJECTED']);
         $this->assertDatabaseHas('manual_payment_submission_events', ['manual_payment_submission_id' => $submission->id, 'event_type' => 'RESUBMITTED']);

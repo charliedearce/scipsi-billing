@@ -286,6 +286,16 @@ class BillingRequestQueueTest extends TestCase
             'user_id' => $this->customerUser1->id,
             'type' => 'QUEUE',
         ]);
+        $this->assertDatabaseHas('in_app_notifications', [
+            'organization_id' => $this->org->id,
+            'user_id' => $this->teller1->id,
+            'type' => 'TELLER_BILLING',
+        ]);
+        $this->assertDatabaseHas('in_app_notifications', [
+            'organization_id' => $this->org->id,
+            'user_id' => $this->teller2->id,
+            'type' => 'TELLER_BILLING',
+        ]);
     }
 
     public function test_submission_is_rejected_when_mandatory_document_is_missing(): void

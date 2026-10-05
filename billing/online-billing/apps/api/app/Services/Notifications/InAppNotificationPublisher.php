@@ -4,11 +4,31 @@ namespace App\Services\Notifications;
 
 use App\Events\InAppNotificationEvent;
 use App\Models\InAppNotification;
+use App\Models\User;
 use App\Support\SafeBroadcast;
 use Illuminate\Support\Str;
 
 class InAppNotificationPublisher
 {
+    /** @param array<string, mixed> $data */
+    public function publishToTellers(
+        int $organizationId,
+        ?int $locationId,
+        string $type,
+        string $title,
+        string $body,
+        string $dedupeKey,
+        array $data = [],
+    ): void {
+        User::query()
+            ->where('organization_id', $organizationId)
+            ->where('status', 'active')
+            ->whereHas('roles', fn ($query) => $query->where('name', 'Teller'))
+            ->when($locationId, fn ($query) => $query->whereHas('locations', fn ($locations) => $locations->where('locations.id', $locationId)))
+            ->pluck('id')
+            ->each(fn ($userId) => $this->publishOnce($organizationId, (int) $userId, $type, $title, $body, $dedupeKey, $data));
+    }
+
     /**
      * Persist a durable in-app notification and wake the recipient over Reverb.
      *

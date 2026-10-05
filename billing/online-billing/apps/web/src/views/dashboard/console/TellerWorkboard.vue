@@ -94,9 +94,11 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, ref } from 'vue'
+  import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
   import { useRouter } from 'vue-router'
   import request from '@/utils/http'
+  import { fetchGetUserInfo } from '@/api/auth'
+  import { onDataRefresh } from '@/utils/echo'
   import { useUserStore } from '@/store/modules/user'
   import type { BillingRequestItem, TellerQueueSummary } from '@/api/billingRequests'
   import type { BillClaimItem, BillClaimListResponse } from '@/api/billClaims'
@@ -128,6 +130,8 @@
   const claims = ref<BillClaimListResponse | null>(null)
   const vipWaiting = ref<CountPage<VipCreditRepayment> | null>(null)
   const vipInReview = ref<CountPage<VipCreditRepayment> | null>(null)
+  const stopRealtime: Array<() => void> = []
+  let recoveryTimer: ReturnType<typeof setInterval> | undefined
 
   const userDisplayName = computed(() => userStore.info?.userName || 'Teller')
   const currentDate = computed(() =>
@@ -293,5 +297,25 @@
     loading.value = false
   }
 
-  onMounted(load)
+  onMounted(async () => {
+    await load()
+    try {
+      const me = await fetchGetUserInfo()
+      const organizationId = Number((me as any).organization?.id)
+      if (organizationId) {
+        stopRealtime.push(onDataRefresh(organizationId, 'queue', load))
+        stopRealtime.push(onDataRefresh(organizationId, 'payments', load))
+      }
+    } catch {
+      // The recovery timer keeps the workboard current if realtime is unavailable.
+    }
+    recoveryTimer = setInterval(() => {
+      if (document.visibilityState === 'visible' && !loading.value) void load()
+    }, 30_000)
+  })
+
+  onBeforeUnmount(() => {
+    stopRealtime.forEach((stop) => stop())
+    if (recoveryTimer) clearInterval(recoveryTimer)
+  })
 </script>
