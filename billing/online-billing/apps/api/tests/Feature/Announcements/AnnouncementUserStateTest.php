@@ -114,6 +114,10 @@ class AnnouncementUserStateTest extends TestCase
         $dismissResp->assertStatus(200)
             ->assertJsonPath('message', 'Announcement dismissed');
 
+        $state = AnnouncementUserState::where('user_id', $this->customer->id)->first();
+        $this->assertNotNull($state?->acknowledged_at);
+        $this->assertNotNull($state?->dismissed_at);
+
         // After dismissal, notice is excluded from active list
         $this->actingAs($this->customer, 'sanctum')
             ->getJson('/api/v1/announcements/active')

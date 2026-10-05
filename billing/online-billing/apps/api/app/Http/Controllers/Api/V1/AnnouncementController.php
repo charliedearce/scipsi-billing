@@ -31,6 +31,18 @@ class AnnouncementController extends Controller
         ]);
     }
 
+    public function bulletinBoard(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $notices = $this->announcementService->getBulletinBoardForUser($user);
+
+        return response()->json([
+            'data' => $notices,
+            'total' => $notices->count(),
+        ]);
+    }
+
     /**
      * Mark an announcement as seen by the user.
      */

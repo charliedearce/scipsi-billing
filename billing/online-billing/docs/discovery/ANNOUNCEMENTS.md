@@ -48,6 +48,8 @@ Add **Admin > Communications > Announcements** beside, but distinct from, **Cust
 
 The application shell fetches active notices after authenticated bootstrap and shows a clear banner/notice center. Notices must remain accessible on desktop and installed PWA layouts, with an accessible focus/order, semantic severity, screen-reader text and no intrusive rendering that covers a teller's active financial editor. A maintenance warning may link only to an approved internal status/help area when such a route exists. The user can dismiss only notices whose configured policy allows it; a later change/version never erases audit history.
 
+2026-10-04 extension: Customer, Teller and PPA user menus include a read-only **Bulletin Board**. It lists applicable published notices under **Current** and **Past** (expired). Dismissing a banner does not remove its current version from the board. The board uses the same organization, role and location audience checks as the active feed; future scheduled, draft and retired notices are hidden. The Admin publishing workspace remains separate. Older superseded versions remain in Admin history, not on the user board.
+
 ## 6. Acceptance and phase mapping
 
 **P1-12 — Establish in-app announcements** depends on P1-02/P1-03/P1-05/P1-08/P1-11. It implements durable draft/schedule/publish/retire flow, organization/role/location authorization, safe rendering, per-user state, after-commit Reverb update with API recovery, audit and fake-clock/effective-window tests. PWA support is tested as an app-shell presentation/recovery detail; no Web Push, SMS or e-mail send is included.
@@ -62,4 +64,4 @@ Required acceptance proves:
 - seen/acknowledge/dismiss state is isolated by user/version and cannot change any bill, payment, receipt, queue, credit, PPA or fiscal state; and
 - W31 is not called by publication, and web-push permission is not requested merely to show an in-app notice.
 
-Open decisions: exact content retention/visibility after expiry, operations owner and emergency/maintenance mode procedure, which role/location targeting is allowed in v1, approval/separation requirements for `CRITICAL` messages, organization support-contact wording, and a future separately approved push/e-mail/SMS escalation path.
+Open decisions: long-term content retention after expiry, operations owner and emergency/maintenance mode procedure, which role/location targeting is allowed in v1, approval/separation requirements for `CRITICAL` messages, organization support-contact wording, and a future separately approved push/e-mail/SMS escalation path.

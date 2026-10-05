@@ -414,6 +414,19 @@ class AnnouncementService
      */
     public function getActiveAnnouncementsForUser(User $user): Collection
     {
+        return $this->getAnnouncementsForUser($user, false);
+    }
+
+    /** Published notices for the user's bulletin board, including dismissed and expired items. */
+    public function getBulletinBoardForUser(User $user): Collection
+    {
+        return $this->getAnnouncementsForUser($user, true)
+            ->sortByDesc('effective_start_at')
+            ->values();
+    }
+
+    private function getAnnouncementsForUser(User $user, bool $includePast): Collection
+    {
         if (! $user->isActive()) {
             return collect();
         }
@@ -444,7 +457,8 @@ class AnnouncementService
             if ($version->effective_start_at->gt($now)) {
                 continue; // Not yet effective
             }
-            if ($version->effective_end_at && $version->effective_end_at->lt($now)) {
+            $isCurrent = ! $version->effective_end_at || ! $version->effective_end_at->lt($now);
+            if (! $includePast && ! $isCurrent) {
                 continue; // Expired
             }
 
@@ -459,7 +473,7 @@ class AnnouncementService
                 ->first();
 
             // Exclude dismissed notices if notice is dismissible
-            if ($version->is_dismissible && $userState && $userState->dismissed_at !== null) {
+            if (! $includePast && $version->is_dismissible && $userState && $userState->dismissed_at !== null) {
                 continue;
             }
 
@@ -475,6 +489,7 @@ class AnnouncementService
                 'effective_end_at' => $version->effective_end_at?->toIso8601String(),
                 'change_reason' => $version->change_reason,
                 'published_at' => $version->published_at?->toIso8601String(),
+                'is_current' => $isCurrent,
                 'user_state' => [
                     'seen' => $userState && $userState->seen_at !== null,
                     'acknowledged' => $userState && $userState->acknowledged_at !== null,
@@ -565,6 +580,7 @@ class AnnouncementService
         if (! $state->seen_at) {
             $state->seen_at = $now;
         }
+        $state->acknowledged_at ??= $now;
         $state->dismissed_at = $now;
         $state->save();
 

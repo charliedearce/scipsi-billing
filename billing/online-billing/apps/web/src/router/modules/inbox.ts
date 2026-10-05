@@ -6,6 +6,18 @@ import { AppRouteRecord } from '@/types/router'
  */
 export const inboxRoutes: AppRouteRecord[] = [
   {
+    path: '/bulletin-board',
+    name: 'BulletinBoard',
+    component: '/communication/bulletin-board/index',
+    meta: {
+      title: 'Bulletin Board',
+      description: 'Current and past announcements for your account and role.',
+      icon: 'ri:megaphone-line',
+      keepAlive: false,
+      roles: ['Customer', 'Teller', 'PPA user']
+    }
+  },
+  {
     path: '/chat',
     name: 'PortalChat',
     component: '/communication/chat/index',

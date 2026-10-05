@@ -24,6 +24,7 @@ export interface ActiveAnnouncement {
   effective_end_at?: string | null
   change_reason?: string | null
   published_at?: string | null
+  is_current: boolean
   user_state: ActiveAnnouncementUserState
 }
 
@@ -142,8 +143,14 @@ export interface RetireAnnouncementPayload {
 
 // User-facing active notices
 export function fetchActiveAnnouncements() {
-  return request.get<{ data: ActiveAnnouncement[]; total: number }>({
+  return request.get<ActiveAnnouncement[]>({
     url: '/api/v1/announcements/active'
+  })
+}
+
+export function fetchBulletinBoard() {
+  return request.get<ActiveAnnouncement[]>({
+    url: '/api/v1/announcements/bulletin-board'
   })
 }
 

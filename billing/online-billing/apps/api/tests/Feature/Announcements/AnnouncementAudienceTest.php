@@ -227,5 +227,94 @@ class AnnouncementAudienceTest extends TestCase
         $this->actingAs($userOrgB, 'sanctum')
             ->getJson('/api/v1/announcements/active')
             ->assertJsonPath('total', 0);
+        $this->actingAs($userOrgB, 'sanctum')
+            ->getJson('/api/v1/announcements/bulletin-board')
+            ->assertJsonPath('total', 0);
+    }
+
+    public function test_bulletin_board_keeps_dismissed_and_expired_notices_with_audience_scope(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+
+        $notice = $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/admin/announcements', [
+                'title' => 'Customer operating notice',
+                'body' => 'The counter closes early today.',
+                'severity' => 'IMPORTANT',
+                'audience_type' => 'targeted',
+                'role_ids' => [Role::where('name', 'Customer')->first()->id],
+                'effective_end_at' => now()->addHour()->toIso8601String(),
+                'is_dismissible' => true,
+                'publish_now' => true,
+            ]);
+        $notice->assertCreated();
+        $id = $notice->json('data.id');
+
+        $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/admin/announcements', [
+                'title' => 'Staff-only notice',
+                'body' => 'Staff guidance.',
+                'severity' => 'INFO',
+                'audience_type' => 'targeted',
+                'role_ids' => [Role::where('name', 'Teller')->first()->id],
+                'publish_now' => true,
+            ])->assertCreated();
+
+        $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/admin/announcements', [
+                'title' => 'Future customer notice',
+                'body' => 'This starts later.',
+                'severity' => 'INFO',
+                'effective_start_at' => now()->addDay()->toIso8601String(),
+                'publish_now' => true,
+            ])->assertCreated();
+        $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/admin/announcements', [
+                'title' => 'Unpublished draft',
+                'body' => 'This is not approved.',
+                'severity' => 'INFO',
+            ])->assertCreated();
+        $retired = $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/admin/announcements', [
+                'title' => 'Withdrawn notice',
+                'body' => 'This was withdrawn.',
+                'severity' => 'INFO',
+                'publish_now' => true,
+            ]);
+        $this->actingAs($this->admin, 'sanctum')
+            ->postJson('/api/v1/admin/announcements/'.$retired->json('data.id').'/retire', [
+                'retirement_reason' => 'Incorrect information.',
+            ])->assertOk();
+
+        $this->actingAs($this->customer, 'sanctum')
+            ->postJson("/api/v1/announcements/{$id}/dismiss")
+            ->assertOk();
+
+        $this->actingAs($this->customer, 'sanctum')
+            ->getJson('/api/v1/announcements/active')
+            ->assertJsonPath('total', 0);
+        $this->actingAs($this->customer, 'sanctum')
+            ->getJson('/api/v1/announcements/bulletin-board')
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $id)
+            ->assertJsonPath('data.0.is_current', true)
+            ->assertJsonPath('data.0.user_state.dismissed', true);
+
+        $this->travel(2)->hours();
+        $this->actingAs($this->customer, 'sanctum')
+            ->getJson('/api/v1/announcements/bulletin-board')
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.is_current', false);
+
+        $this->actingAs($this->teller, 'sanctum')
+            ->getJson('/api/v1/announcements/bulletin-board')
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.title', 'Staff-only notice');
+        $this->actingAs($this->ppa, 'sanctum')
+            ->getJson('/api/v1/announcements/bulletin-board')
+            ->assertOk()
+            ->assertJsonPath('total', 0);
     }
 }
