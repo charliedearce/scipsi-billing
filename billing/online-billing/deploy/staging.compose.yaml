@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: scipsi_staging
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets: [postgres_password]
-    volumes: [postgres_data:/var/lib/postgresql]
+    volumes: [/var/lib/docker/volumes/v5txsjklyp7ejjfqivx9dmft_postgres-data/_data:/var/lib/postgresql]
     healthcheck:
       test: [CMD-SHELL, 'pg_isready -U scipsi_staging -d scipsi_staging']
       interval: 10s
@@ -17,7 +17,7 @@ services:
   redis:
     image: redis:8-alpine@sha256:978f0e01593e65eed801f2402944efcd936d43b5027e4908a7897baf88ed6241
     command: [redis-server, --appendonly, 'yes']
-    volumes: [redis_data:/data]
+    volumes: [/var/lib/docker/volumes/v5txsjklyp7ejjfqivx9dmft_redis-data/_data:/data]
     healthcheck:
       test: [CMD, redis-cli, ping]
       interval: 10s
@@ -33,7 +33,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
-    volumes: [api_private_storage:/var/www/html/storage/app/private]
+    volumes: [/var/lib/docker/volumes/v5txsjklyp7ejjfqivx9dmft_api-private-storage/_data:/var/www/html/storage/app/private]
     restart: unless-stopped
   worker:
     image: scipsi-online-api:staging-git
@@ -42,7 +42,7 @@ services:
     secrets: [postgres_password]
     depends_on:
       api: {condition: service_started}
-    volumes: [api_private_storage:/var/www/html/storage/app/private]
+    volumes: [/var/lib/docker/volumes/v5txsjklyp7ejjfqivx9dmft_api-private-storage/_data:/var/www/html/storage/app/private]
     command: [php, artisan, queue:work, redis, --queue=default, --sleep=1, --tries=1, --timeout=120]
     restart: unless-stopped
   scheduler:
@@ -72,13 +72,3 @@ services:
 secrets:
   postgres_password:
     file: /root/scipsi-staging/secrets/postgres_password
-volumes:
-  postgres_data:
-    external: true
-    name: v5txsjklyp7ejjfqivx9dmft_postgres-data
-  redis_data:
-    external: true
-    name: v5txsjklyp7ejjfqivx9dmft_redis-data
-  api_private_storage:
-    external: true
-    name: v5txsjklyp7ejjfqivx9dmft_api-private-storage
